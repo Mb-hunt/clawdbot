@@ -1,7 +1,7 @@
-import { resolveClawdbotPackageRoot } from "../../infra/clawdbot-root.js";
+import { resolveMoltbotPackageRoot } from "../../infra/moltbot-root.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import {
-  DOCTOR_NONINTERACTIVE_HINT,
+  formatDoctorNonInteractiveHint,
   type RestartSentinelPayload,
   writeRestartSentinel,
 } from "../../infra/restart-sentinel.js";
@@ -35,11 +35,9 @@ export const updateHandlers: GatewayRequestHandlers = {
       typeof (params as { note?: unknown }).note === "string"
         ? (params as { note?: string }).note?.trim() || undefined
         : undefined;
-    const restartDelayMsRaw = (params as { restartDelayMs?: unknown })
-      .restartDelayMs;
+    const restartDelayMsRaw = (params as { restartDelayMs?: unknown }).restartDelayMs;
     const restartDelayMs =
-      typeof restartDelayMsRaw === "number" &&
-      Number.isFinite(restartDelayMsRaw)
+      typeof restartDelayMsRaw === "number" && Number.isFinite(restartDelayMsRaw)
         ? Math.max(0, Math.floor(restartDelayMsRaw))
         : undefined;
     const timeoutMsRaw = (params as { timeoutMs?: unknown }).timeoutMs;
@@ -51,7 +49,7 @@ export const updateHandlers: GatewayRequestHandlers = {
     let result: Awaited<ReturnType<typeof runGatewayUpdate>>;
     try {
       const root =
-        (await resolveClawdbotPackageRoot({
+        (await resolveMoltbotPackageRoot({
           moduleUrl: import.meta.url,
           argv1: process.argv[1],
           cwd: process.cwd(),
@@ -77,7 +75,7 @@ export const updateHandlers: GatewayRequestHandlers = {
       ts: Date.now(),
       sessionKey,
       message: note ?? null,
-      doctorHint: DOCTOR_NONINTERACTIVE_HINT,
+      doctorHint: formatDoctorNonInteractiveHint(),
       stats: {
         mode: result.mode,
         root: result.root ?? undefined,

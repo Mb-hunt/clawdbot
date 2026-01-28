@@ -9,6 +9,12 @@ function buildProfileQuery(profile?: string): string {
   return profile ? `?profile=${encodeURIComponent(profile)}` : "";
 }
 
+function withBaseUrl(baseUrl: string | undefined, path: string): string {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) return path;
+  return `${trimmed.replace(/\/$/, "")}${path}`;
+}
+
 export type BrowserFormField = {
   ref: string;
   type: string;
@@ -92,23 +98,24 @@ export type BrowserDownloadPayload = {
 };
 
 export async function browserNavigate(
-  baseUrl: string,
-  opts: { url: string; targetId?: string; profile?: string },
+  baseUrl: string | undefined,
+  opts: {
+    url: string;
+    targetId?: string;
+    profile?: string;
+  },
 ): Promise<BrowserActionTabResult> {
   const q = buildProfileQuery(opts.profile);
-  return await fetchBrowserJson<BrowserActionTabResult>(
-    `${baseUrl}/navigate${q}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: opts.url, targetId: opts.targetId }),
-      timeoutMs: 20000,
-    },
-  );
+  return await fetchBrowserJson<BrowserActionTabResult>(withBaseUrl(baseUrl, `/navigate${q}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: opts.url, targetId: opts.targetId }),
+    timeoutMs: 20000,
+  });
 }
 
 export async function browserArmDialog(
-  baseUrl: string,
+  baseUrl: string | undefined,
   opts: {
     accept: boolean;
     promptText?: string;
@@ -118,24 +125,21 @@ export async function browserArmDialog(
   },
 ): Promise<BrowserActionOk> {
   const q = buildProfileQuery(opts.profile);
-  return await fetchBrowserJson<BrowserActionOk>(
-    `${baseUrl}/hooks/dialog${q}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accept: opts.accept,
-        promptText: opts.promptText,
-        targetId: opts.targetId,
-        timeoutMs: opts.timeoutMs,
-      }),
-      timeoutMs: 20000,
-    },
-  );
+  return await fetchBrowserJson<BrowserActionOk>(withBaseUrl(baseUrl, `/hooks/dialog${q}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      accept: opts.accept,
+      promptText: opts.promptText,
+      targetId: opts.targetId,
+      timeoutMs: opts.timeoutMs,
+    }),
+    timeoutMs: 20000,
+  });
 }
 
 export async function browserArmFileChooser(
-  baseUrl: string,
+  baseUrl: string | undefined,
   opts: {
     paths: string[];
     ref?: string;
@@ -147,26 +151,23 @@ export async function browserArmFileChooser(
   },
 ): Promise<BrowserActionOk> {
   const q = buildProfileQuery(opts.profile);
-  return await fetchBrowserJson<BrowserActionOk>(
-    `${baseUrl}/hooks/file-chooser${q}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        paths: opts.paths,
-        ref: opts.ref,
-        inputRef: opts.inputRef,
-        element: opts.element,
-        targetId: opts.targetId,
-        timeoutMs: opts.timeoutMs,
-      }),
-      timeoutMs: 20000,
-    },
-  );
+  return await fetchBrowserJson<BrowserActionOk>(withBaseUrl(baseUrl, `/hooks/file-chooser${q}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paths: opts.paths,
+      ref: opts.ref,
+      inputRef: opts.inputRef,
+      element: opts.element,
+      targetId: opts.targetId,
+      timeoutMs: opts.timeoutMs,
+    }),
+    timeoutMs: 20000,
+  });
 }
 
 export async function browserWaitForDownload(
-  baseUrl: string,
+  baseUrl: string | undefined,
   opts: {
     path?: string;
     targetId?: string;
@@ -179,7 +180,7 @@ export async function browserWaitForDownload(
     ok: true;
     targetId: string;
     download: BrowserDownloadPayload;
-  }>(`${baseUrl}/wait/download${q}`, {
+  }>(withBaseUrl(baseUrl, `/wait/download${q}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -192,7 +193,7 @@ export async function browserWaitForDownload(
 }
 
 export async function browserDownload(
-  baseUrl: string,
+  baseUrl: string | undefined,
   opts: {
     ref: string;
     path: string;
@@ -206,7 +207,7 @@ export async function browserDownload(
     ok: true;
     targetId: string;
     download: BrowserDownloadPayload;
-  }>(`${baseUrl}/download${q}`, {
+  }>(withBaseUrl(baseUrl, `/download${q}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -220,12 +221,12 @@ export async function browserDownload(
 }
 
 export async function browserAct(
-  baseUrl: string,
+  baseUrl: string | undefined,
   req: BrowserActRequest,
   opts?: { profile?: string },
 ): Promise<BrowserActResponse> {
   const q = buildProfileQuery(opts?.profile);
-  return await fetchBrowserJson<BrowserActResponse>(`${baseUrl}/act${q}`, {
+  return await fetchBrowserJson<BrowserActResponse>(withBaseUrl(baseUrl, `/act${q}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -234,7 +235,7 @@ export async function browserAct(
 }
 
 export async function browserScreenshotAction(
-  baseUrl: string,
+  baseUrl: string | undefined,
   opts: {
     targetId?: string;
     fullPage?: boolean;
@@ -245,19 +246,16 @@ export async function browserScreenshotAction(
   },
 ): Promise<BrowserActionPathResult> {
   const q = buildProfileQuery(opts.profile);
-  return await fetchBrowserJson<BrowserActionPathResult>(
-    `${baseUrl}/screenshot${q}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        targetId: opts.targetId,
-        fullPage: opts.fullPage,
-        ref: opts.ref,
-        element: opts.element,
-        type: opts.type,
-      }),
-      timeoutMs: 20000,
-    },
-  );
+  return await fetchBrowserJson<BrowserActionPathResult>(withBaseUrl(baseUrl, `/screenshot${q}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      targetId: opts.targetId,
+      fullPage: opts.fullPage,
+      ref: opts.ref,
+      element: opts.element,
+      type: opts.type,
+    }),
+    timeoutMs: 20000,
+  });
 }

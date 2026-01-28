@@ -1,4 +1,4 @@
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import {
   addChannelAllowFromStoreEntry,
   approveChannelPairingCode,
@@ -95,7 +95,7 @@ export async function approveTelegramPairingCode(params: {
 }
 
 export async function resolveTelegramEffectiveAllowFrom(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   env?: NodeJS.ProcessEnv;
 }): Promise<{ dm: string[]; group: string[] }> {
   const env = params.env ?? process.env;
@@ -104,9 +104,7 @@ export async function resolveTelegramEffectiveAllowFrom(params: {
     .filter(Boolean)
     .map((v) => v.replace(/^(telegram|tg):/i, ""))
     .filter((v) => v !== "*");
-  const cfgGroupAllowFrom = (
-    params.cfg.channels?.telegram?.groupAllowFrom ?? []
-  )
+  const cfgGroupAllowFrom = (params.cfg.channels?.telegram?.groupAllowFrom ?? [])
     .map((v) => String(v).trim())
     .filter(Boolean)
     .map((v) => v.replace(/^(telegram|tg):/i, ""))

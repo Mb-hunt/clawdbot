@@ -1,4 +1,4 @@
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { MoltbotConfig } from "../../config/config.js";
 import { DEFAULT_ACCOUNT_ID } from "../../routing/session-key.js";
 
 type ChannelSection = {
@@ -7,21 +7,17 @@ type ChannelSection = {
 };
 
 export function setAccountEnabledInConfigSection(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   sectionKey: string;
   accountId: string;
   enabled: boolean;
   allowTopLevel?: boolean;
-}): ClawdbotConfig {
+}): MoltbotConfig {
   const accountKey = params.accountId || DEFAULT_ACCOUNT_ID;
   const channels = params.cfg.channels as Record<string, unknown> | undefined;
   const base = channels?.[params.sectionKey] as ChannelSection | undefined;
   const hasAccounts = Boolean(base?.accounts);
-  if (
-    params.allowTopLevel &&
-    accountKey === DEFAULT_ACCOUNT_ID &&
-    !hasAccounts
-  ) {
+  if (params.allowTopLevel && accountKey === DEFAULT_ACCOUNT_ID && !hasAccounts) {
     return {
       ...params.cfg,
       channels: {
@@ -31,13 +27,10 @@ export function setAccountEnabledInConfigSection(params: {
           enabled: params.enabled,
         },
       },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
   }
 
-  const baseAccounts = (base?.accounts ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
+  const baseAccounts = (base?.accounts ?? {}) as Record<string, Record<string, unknown>>;
   const existing = baseAccounts[accountKey] ?? {};
   return {
     ...params.cfg,
@@ -54,24 +47,22 @@ export function setAccountEnabledInConfigSection(params: {
         },
       },
     },
-  } as ClawdbotConfig;
+  } as MoltbotConfig;
 }
 
 export function deleteAccountFromConfigSection(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   sectionKey: string;
   accountId: string;
   clearBaseFields?: string[];
-}): ClawdbotConfig {
+}): MoltbotConfig {
   const accountKey = params.accountId || DEFAULT_ACCOUNT_ID;
   const channels = params.cfg.channels as Record<string, unknown> | undefined;
   const base = channels?.[params.sectionKey] as ChannelSection | undefined;
   if (!base) return params.cfg;
 
   const baseAccounts =
-    base.accounts && typeof base.accounts === "object"
-      ? { ...base.accounts }
-      : undefined;
+    base.accounts && typeof base.accounts === "object" ? { ...base.accounts } : undefined;
 
   if (accountKey !== DEFAULT_ACCOUNT_ID) {
     const accounts = baseAccounts ? { ...baseAccounts } : {};
@@ -85,7 +76,7 @@ export function deleteAccountFromConfigSection(params: {
           accounts: Object.keys(accounts).length ? accounts : undefined,
         },
       },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
   }
 
   if (baseAccounts && Object.keys(baseAccounts).length > 0) {
@@ -103,14 +94,14 @@ export function deleteAccountFromConfigSection(params: {
           accounts: Object.keys(baseAccounts).length ? baseAccounts : undefined,
         },
       },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
   }
 
   const nextChannels = { ...params.cfg.channels } as Record<string, unknown>;
   delete nextChannels[params.sectionKey];
-  const nextCfg = { ...params.cfg } as ClawdbotConfig;
+  const nextCfg = { ...params.cfg } as MoltbotConfig;
   if (Object.keys(nextChannels).length > 0) {
-    nextCfg.channels = nextChannels as ClawdbotConfig["channels"];
+    nextCfg.channels = nextChannels as MoltbotConfig["channels"];
   } else {
     delete nextCfg.channels;
   }

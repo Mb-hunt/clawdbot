@@ -1,13 +1,13 @@
-import type express from "express";
-
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
+import { parseBooleanValue } from "../../utils/boolean.js";
+import type { BrowserRequest, BrowserResponse } from "./types.js";
 
 /**
  * Extract profile name from query string or body and get profile context.
  * Query string takes precedence over body for consistency with GET routes.
  */
 export function getProfileContext(
-  req: express.Request,
+  req: BrowserRequest,
   ctx: BrowserRouteContext,
 ): ProfileContext | { error: string; status: number } {
   let profileName: string | undefined;
@@ -32,11 +32,7 @@ export function getProfileContext(
   }
 }
 
-export function jsonError(
-  res: express.Response,
-  status: number,
-  message: string,
-) {
+export function jsonError(res: BrowserResponse, status: number, message: string) {
   res.status(status).json({ error: message });
 }
 
@@ -58,13 +54,10 @@ export function toNumber(value: unknown) {
 }
 
 export function toBoolean(value: unknown) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const v = value.trim().toLowerCase();
-    if (v === "true" || v === "1" || v === "yes") return true;
-    if (v === "false" || v === "0" || v === "no") return false;
-  }
-  return undefined;
+  return parseBooleanValue(value, {
+    truthy: ["true", "1", "yes"],
+    falsy: ["false", "0", "no"],
+  });
 }
 
 export function toStringArray(value: unknown): string[] | undefined {

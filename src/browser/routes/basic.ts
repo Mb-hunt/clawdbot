@@ -1,13 +1,10 @@
-import type express from "express";
-
+import { resolveBrowserExecutableForPlatform } from "../chrome.executables.js";
 import { createBrowserProfilesService } from "../profiles-service.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import { getProfileContext, jsonError, toStringOrEmpty } from "./utils.js";
+import type { BrowserRouteRegistrar } from "./types.js";
 
-export function registerBrowserBasicRoutes(
-  app: express.Express,
-  ctx: BrowserRouteContext,
-) {
+export function registerBrowserBasicRoutes(app: BrowserRouteRegistrar, ctx: BrowserRouteContext) {
   // List all profiles with their status
   app.get("/profiles", async (_req, res) => {
     try {
@@ -39,10 +36,22 @@ export function registerBrowserBasicRoutes(
     ]);
 
     const profileState = current.profiles.get(profileCtx.profile.name);
+    let detectedBrowser: string | null = null;
+    let detectedExecutablePath: string | null = null;
+    let detectError: string | null = null;
+
+    try {
+      const detected = resolveBrowserExecutableForPlatform(current.resolved, process.platform);
+      if (detected) {
+        detectedBrowser = detected.kind;
+        detectedExecutablePath = detected.path;
+      }
+    } catch (err) {
+      detectError = String(err);
+    }
 
     res.json({
       enabled: current.resolved.enabled,
-      controlUrl: current.resolved.controlUrl,
       profile: profileCtx.profile.name,
       running: cdpReady,
       cdpReady,
@@ -51,6 +60,9 @@ export function registerBrowserBasicRoutes(
       cdpPort: profileCtx.profile.cdpPort,
       cdpUrl: profileCtx.profile.cdpUrl,
       chosenBrowser: profileState?.running?.exe.kind ?? null,
+      detectedBrowser,
+      detectedExecutablePath,
+      detectError,
       userDataDir: profileState?.running?.userDataDir ?? null,
       color: profileCtx.profile.color,
       headless: current.resolved.headless,
@@ -114,6 +126,10 @@ export function registerBrowserBasicRoutes(
     const name = toStringOrEmpty((req.body as { name?: unknown })?.name);
     const color = toStringOrEmpty((req.body as { color?: unknown })?.color);
     const cdpUrl = toStringOrEmpty((req.body as { cdpUrl?: unknown })?.cdpUrl);
+    const driver = toStringOrEmpty((req.body as { driver?: unknown })?.driver) as
+      | "clawd"
+      | "extension"
+      | "";
 
     if (!name) return jsonError(res, 400, "name is required");
 
@@ -123,6 +139,7 @@ export function registerBrowserBasicRoutes(
         name,
         color: color || undefined,
         cdpUrl: cdpUrl || undefined,
+        driver: driver === "extension" ? "extension" : undefined,
       });
       res.json(result);
     } catch (err) {

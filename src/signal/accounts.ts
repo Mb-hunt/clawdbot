@@ -1,9 +1,6 @@
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import type { SignalAccountConfig } from "../config/types.js";
-import {
-  DEFAULT_ACCOUNT_ID,
-  normalizeAccountId,
-} from "../routing/session-key.js";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 
 export type ResolvedSignalAccount = {
   accountId: string;
@@ -14,26 +11,26 @@ export type ResolvedSignalAccount = {
   config: SignalAccountConfig;
 };
 
-function listConfiguredAccountIds(cfg: ClawdbotConfig): string[] {
+function listConfiguredAccountIds(cfg: MoltbotConfig): string[] {
   const accounts = cfg.channels?.signal?.accounts;
   if (!accounts || typeof accounts !== "object") return [];
   return Object.keys(accounts).filter(Boolean);
 }
 
-export function listSignalAccountIds(cfg: ClawdbotConfig): string[] {
+export function listSignalAccountIds(cfg: MoltbotConfig): string[] {
   const ids = listConfiguredAccountIds(cfg);
   if (ids.length === 0) return [DEFAULT_ACCOUNT_ID];
   return ids.sort((a, b) => a.localeCompare(b));
 }
 
-export function resolveDefaultSignalAccountId(cfg: ClawdbotConfig): string {
+export function resolveDefaultSignalAccountId(cfg: MoltbotConfig): string {
   const ids = listSignalAccountIds(cfg);
   if (ids.includes(DEFAULT_ACCOUNT_ID)) return DEFAULT_ACCOUNT_ID;
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
 }
 
 function resolveAccountConfig(
-  cfg: ClawdbotConfig,
+  cfg: MoltbotConfig,
   accountId: string,
 ): SignalAccountConfig | undefined {
   const accounts = cfg.channels?.signal?.accounts;
@@ -41,18 +38,16 @@ function resolveAccountConfig(
   return accounts[accountId] as SignalAccountConfig | undefined;
 }
 
-function mergeSignalAccountConfig(
-  cfg: ClawdbotConfig,
-  accountId: string,
-): SignalAccountConfig {
-  const { accounts: _ignored, ...base } = (cfg.channels?.signal ??
-    {}) as SignalAccountConfig & { accounts?: unknown };
+function mergeSignalAccountConfig(cfg: MoltbotConfig, accountId: string): SignalAccountConfig {
+  const { accounts: _ignored, ...base } = (cfg.channels?.signal ?? {}) as SignalAccountConfig & {
+    accounts?: unknown;
+  };
   const account = resolveAccountConfig(cfg, accountId) ?? {};
   return { ...base, ...account };
 }
 
 export function resolveSignalAccount(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   accountId?: string | null;
 }): ResolvedSignalAccount {
   const accountId = normalizeAccountId(params.accountId);
@@ -65,11 +60,11 @@ export function resolveSignalAccount(params: {
   const baseUrl = merged.httpUrl?.trim() || `http://${host}:${port}`;
   const configured = Boolean(
     merged.account?.trim() ||
-      merged.httpUrl?.trim() ||
-      merged.cliPath?.trim() ||
-      merged.httpHost?.trim() ||
-      typeof merged.httpPort === "number" ||
-      typeof merged.autoStart === "boolean",
+    merged.httpUrl?.trim() ||
+    merged.cliPath?.trim() ||
+    merged.httpHost?.trim() ||
+    typeof merged.httpPort === "number" ||
+    typeof merged.autoStart === "boolean",
   );
   return {
     accountId,
@@ -81,9 +76,7 @@ export function resolveSignalAccount(params: {
   };
 }
 
-export function listEnabledSignalAccounts(
-  cfg: ClawdbotConfig,
-): ResolvedSignalAccount[] {
+export function listEnabledSignalAccounts(cfg: MoltbotConfig): ResolvedSignalAccount[] {
   return listSignalAccountIds(cfg)
     .map((accountId) => resolveSignalAccount({ cfg, accountId }))
     .filter((account) => account.enabled);

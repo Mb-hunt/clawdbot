@@ -4,12 +4,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ClawdbotConfig } from "../../config/config.js";
-import {
-  __testing,
-  createImageTool,
-  resolveImageModelConfigForTool,
-} from "./image-tool.js";
+import type { MoltbotConfig } from "../../config/config.js";
+import { __testing, createImageTool, resolveImageModelConfigForTool } from "./image-tool.js";
 
 async function writeAuthProfiles(agentDir: string, profiles: unknown) {
   await fs.mkdir(agentDir, { recursive: true });
@@ -41,10 +37,8 @@ describe("image tool implicit imageModel config", () => {
   });
 
   it("stays disabled without auth when no pairing is possible", async () => {
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-"),
-    );
-    const cfg: ClawdbotConfig = {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-"));
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "openai/gpt-5.2" } } },
     };
     expect(resolveImageModelConfigForTool({ cfg, agentDir })).toBeNull();
@@ -52,13 +46,11 @@ describe("image tool implicit imageModel config", () => {
   });
 
   it("pairs minimax primary with MiniMax-VL-01 (and fallbacks) when auth exists", async () => {
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-"),
-    );
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-"));
     vi.stubEnv("MINIMAX_API_KEY", "minimax-test");
     vi.stubEnv("OPENAI_API_KEY", "openai-test");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test");
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "minimax/MiniMax-M2.1" } } },
     };
     expect(resolveImageModelConfigForTool({ cfg, agentDir })).toEqual({
@@ -69,16 +61,14 @@ describe("image tool implicit imageModel config", () => {
   });
 
   it("pairs a custom provider when it declares an image-capable model", async () => {
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-"),
-    );
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-"));
     await writeAuthProfiles(agentDir, {
       version: 1,
       profiles: {
         "acme:default": { type: "api_key", provider: "acme", key: "sk-test" },
       },
     });
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "acme/text-1" } } },
       models: {
         providers: {
@@ -98,10 +88,8 @@ describe("image tool implicit imageModel config", () => {
   });
 
   it("prefers explicit agents.defaults.imageModel", async () => {
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-"),
-    );
-    const cfg: ClawdbotConfig = {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-"));
+    const cfg: MoltbotConfig = {
       agents: {
         defaults: {
           model: { primary: "minimax/MiniMax-M2.1" },
@@ -114,10 +102,40 @@ describe("image tool implicit imageModel config", () => {
     });
   });
 
-  it("sandboxes image paths like the read tool", async () => {
-    const stateDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-sandbox-"),
+  it("keeps image tool available when primary model supports images (for explicit requests)", async () => {
+    // When the primary model supports images, we still keep the tool available
+    // because images are auto-injected into prompts. The tool description is
+    // adjusted via modelHasVision to discourage redundant usage.
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-"));
+    const cfg: MoltbotConfig = {
+      agents: {
+        defaults: {
+          model: { primary: "acme/vision-1" },
+          imageModel: { primary: "openai/gpt-5-mini" },
+        },
+      },
+      models: {
+        providers: {
+          acme: {
+            models: [{ id: "vision-1", input: ["text", "image"] }],
+          },
+        },
+      },
+    };
+    // Tool should still be available for explicit image analysis requests
+    expect(resolveImageModelConfigForTool({ cfg, agentDir })).toEqual({
+      primary: "openai/gpt-5-mini",
+    });
+    const tool = createImageTool({ config: cfg, agentDir, modelHasVision: true });
+    expect(tool).not.toBeNull();
+    expect(tool?.description).toContain(
+      "Only use this tool when the image was NOT already provided",
     );
+  });
+
+  it("sandboxes image paths like the read tool", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-sandbox-"));
     const agentDir = path.join(stateDir, "agent");
     const sandboxRoot = path.join(stateDir, "sandbox");
     await fs.mkdir(agentDir, { recursive: true });
@@ -125,26 +143,24 @@ describe("image tool implicit imageModel config", () => {
     await fs.writeFile(path.join(sandboxRoot, "img.png"), "fake", "utf8");
 
     vi.stubEnv("OPENAI_API_KEY", "openai-test");
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "minimax/MiniMax-M2.1" } } },
     };
     const tool = createImageTool({ config: cfg, agentDir, sandboxRoot });
     expect(tool).not.toBeNull();
     if (!tool) throw new Error("expected image tool");
 
-    await expect(
-      tool.execute("t1", { image: "https://example.com/a.png" }),
-    ).rejects.toThrow(/Sandboxed image tool does not allow remote URLs/i);
+    await expect(tool.execute("t1", { image: "https://example.com/a.png" })).rejects.toThrow(
+      /Sandboxed image tool does not allow remote URLs/i,
+    );
 
-    await expect(
-      tool.execute("t2", { image: "../escape.png" }),
-    ).rejects.toThrow(/escapes sandbox root/i);
+    await expect(tool.execute("t2", { image: "../escape.png" })).rejects.toThrow(
+      /escapes sandbox root/i,
+    );
   });
 
   it("rewrites inbound absolute paths into sandbox media/inbound", async () => {
-    const stateDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-image-sandbox-"),
-    );
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-image-sandbox-"));
     const agentDir = path.join(stateDir, "agent");
     const sandboxRoot = path.join(stateDir, "sandbox");
     await fs.mkdir(agentDir, { recursive: true });
@@ -172,7 +188,7 @@ describe("image tool implicit imageModel config", () => {
     global.fetch = fetch;
     vi.stubEnv("MINIMAX_API_KEY", "minimax-test");
 
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         defaults: {
           model: { primary: "minimax/MiniMax-M2.1" },
@@ -190,9 +206,7 @@ describe("image tool implicit imageModel config", () => {
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect((res.details as { rewrittenFrom?: string }).rewrittenFrom).toContain(
-      "photo.png",
-    );
+    expect((res.details as { rewrittenFrom?: string }).rewrittenFrom).toContain("photo.png");
   });
 });
 
@@ -207,9 +221,9 @@ describe("image tool data URL support", () => {
   });
 
   it("rejects non-image data URLs", () => {
-    expect(() =>
-      __testing.decodeDataUrl("data:text/plain;base64,SGVsbG8="),
-    ).toThrow(/Unsupported data URL type/i);
+    expect(() => __testing.decodeDataUrl("data:text/plain;base64,SGVsbG8=")).toThrow(
+      /Unsupported data URL type/i,
+    );
   });
 });
 
@@ -245,11 +259,9 @@ describe("image tool MiniMax VLM routing", () => {
     // @ts-expect-error partial global
     global.fetch = fetch;
 
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-minimax-vlm-"),
-    );
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-minimax-vlm-"));
     vi.stubEnv("MINIMAX_API_KEY", "minimax-test");
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "minimax/MiniMax-M2.1" } } },
     };
     const tool = createImageTool({ config: cfg, agentDir });
@@ -263,11 +275,11 @@ describe("image tool MiniMax VLM routing", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = fetch.mock.calls[0];
-    expect(String(url)).toBe("https://api.minimax.io/v1/coding_plan/vlm");
+    expect(String(url)).toBe("https://api.minimax.chat/v1/coding_plan/vlm");
     expect(init?.method).toBe("POST");
-    expect(
-      String((init?.headers as Record<string, string>)?.Authorization),
-    ).toBe("Bearer minimax-test");
+    expect(String((init?.headers as Record<string, string>)?.Authorization)).toBe(
+      "Bearer minimax-test",
+    );
     expect(String(init?.body)).toContain('"prompt":"Describe the image."');
     expect(String(init?.body)).toContain('"image_url":"data:image/png;base64,');
 
@@ -289,11 +301,9 @@ describe("image tool MiniMax VLM routing", () => {
     // @ts-expect-error partial global
     global.fetch = fetch;
 
-    const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "clawdbot-minimax-vlm-"),
-    );
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-minimax-vlm-"));
     vi.stubEnv("MINIMAX_API_KEY", "minimax-test");
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: { defaults: { model: { primary: "minimax/MiniMax-M2.1" } } },
     };
     const tool = createImageTool({ config: cfg, agentDir });

@@ -13,7 +13,7 @@ Status: external CLI integration. Gateway spawns `imsg rpc` (JSON-RPC over stdio
 1) Ensure Messages is signed in on this Mac.
 2) Install `imsg`:
    - `brew install steipete/tap/imsg`
-3) Configure Clawdbot with `channels.imessage.cliPath` and `channels.imessage.dbPath`.
+3) Configure Moltbot with `channels.imessage.cliPath` and `channels.imessage.dbPath`.
 4) Start the gateway and approve any macOS prompts (Automation + Full Disk Access).
 
 Minimal config:
@@ -35,9 +35,19 @@ Minimal config:
 - DMs share the agent's main session; groups are isolated (`agent:<agentId>:imessage:group:<chat_id>`).
 - If a multi-participant thread arrives with `is_group=false`, you can still isolate it by `chat_id` using `channels.imessage.groups` (see “Group-ish threads” below).
 
+## Config writes
+By default, iMessage is allowed to write config updates triggered by `/config set|unset` (requires `commands.config: true`).
+
+Disable with:
+```json5
+{
+  channels: { imessage: { configWrites: false } }
+}
+```
+
 ## Requirements
 - macOS with Messages signed in.
-- Full Disk Access for Clawdbot + `imsg` (Messages DB access).
+- Full Disk Access for Moltbot + `imsg` (Messages DB access).
 - Automation permission when sending.
 - `channels.imessage.cliPath` can point to any command that proxies stdin/stdout (for example, a wrapper script that SSHes to another Mac and runs `imsg rpc`).
 
@@ -93,23 +103,81 @@ Example config:
 For single-account setups, use flat options (`channels.imessage.cliPath`, `channels.imessage.dbPath`) instead of the `accounts` map.
 
 ### Remote/SSH variant (optional)
-If you want iMessage on another Mac, set `channels.imessage.cliPath` to a wrapper that runs `imsg` on the remote macOS host over SSH. Clawdbot only needs stdio.
+If you want iMessage on another Mac, set `channels.imessage.cliPath` to a wrapper that runs `imsg` on the remote macOS host over SSH. Moltbot only needs stdio.
 
 Example wrapper:
 ```bash
 #!/usr/bin/env bash
-exec ssh -T mac-mini imsg "$@"
+exec ssh -T gateway-host imsg "$@"
 ```
 
-Multi-account support: use `channels.imessage.accounts` with per-account config and optional `name`. See [`gateway/configuration`](/gateway/configuration#telegramaccounts--discordaccounts--slackaccounts--signalaccounts--imessageaccounts) for the shared pattern. Don’t commit `~/.clawdbot/clawdbot.json` (it often contains tokens).
+**Remote attachments:** When `cliPath` points to a remote host via SSH, attachment paths in the Messages database reference files on the remote machine. Moltbot can automatically fetch these over SCP by setting `channels.imessage.remoteHost`:
+
+```json5
+{
+  channels: {
+    imessage: {
+      cliPath: "~/imsg-ssh",                     // SSH wrapper to remote Mac
+      remoteHost: "user@gateway-host",           // for SCP file transfer
+      includeAttachments: true
+    }
+  }
+}
+```
+
+If `remoteHost` is not set, Moltbot attempts to auto-detect it by parsing the SSH command in your wrapper script. Explicit configuration is recommended for reliability.
+
+#### Remote Mac via Tailscale (example)
+If the Gateway runs on a Linux host/VM but iMessage must run on a Mac, Tailscale is the simplest bridge: the Gateway talks to the Mac over the tailnet, runs `imsg` via SSH, and SCPs attachments back.
+
+Architecture:
+```
+┌──────────────────────────────┐          SSH (imsg rpc)          ┌──────────────────────────┐
+│ Gateway host (Linux/VM)      │──────────────────────────────────▶│ Mac with Messages + imsg │
+│ - moltbot gateway           │          SCP (attachments)        │ - Messages signed in     │
+│ - channels.imessage.cliPath  │◀──────────────────────────────────│ - Remote Login enabled   │
+└──────────────────────────────┘                                   └──────────────────────────┘
+              ▲
+              │ Tailscale tailnet (hostname or 100.x.y.z)
+              ▼
+        user@gateway-host
+```
+
+Concrete config example (Tailscale hostname):
+```json5
+{
+  channels: {
+    imessage: {
+      enabled: true,
+      cliPath: "~/.clawdbot/scripts/imsg-ssh",
+      remoteHost: "bot@mac-mini.tailnet-1234.ts.net",
+      includeAttachments: true,
+      dbPath: "/Users/bot/Library/Messages/chat.db"
+    }
+  }
+}
+```
+
+Example wrapper (`~/.clawdbot/scripts/imsg-ssh`):
+```bash
+#!/usr/bin/env bash
+exec ssh -T bot@mac-mini.tailnet-1234.ts.net imsg "$@"
+```
+
+Notes:
+- Ensure the Mac is signed in to Messages, and Remote Login is enabled.
+- Use SSH keys so `ssh bot@mac-mini.tailnet-1234.ts.net` works without prompts.
+- `remoteHost` should match the SSH target so SCP can fetch attachments.
+
+Multi-account support: use `channels.imessage.accounts` with per-account config and optional `name`. See [`gateway/configuration`](/gateway/configuration#telegramaccounts--discordaccounts--slackaccounts--signalaccounts--imessageaccounts) for the shared pattern. Don't commit `~/.clawdbot/moltbot.json` (it often contains tokens).
 
 ## Access control (DMs + groups)
 DMs:
 - Default: `channels.imessage.dmPolicy = "pairing"`.
 - Unknown senders receive a pairing code; messages are ignored until approved (codes expire after 1 hour).
 - Approve via:
-  - `clawdbot pairing list imessage`
-  - `clawdbot pairing approve imessage <CODE>`
+  - `moltbot pairing list imessage`
+  - `moltbot pairing approve imessage <CODE>`
 - Pairing is the default token exchange for iMessage DMs. Details: [Pairing](/start/pairing)
 
 Groups:
@@ -125,7 +193,7 @@ Groups:
 ## Group-ish threads (`is_group=false`)
 Some iMessage threads can have multiple participants but still arrive with `is_group=false` depending on how Messages stores the chat identifier.
 
-If you explicitly configure a `chat_id` under `channels.imessage.groups`, Clawdbot treats that thread as a “group” for:
+If you explicitly configure a `chat_id` under `channels.imessage.groups`, Moltbot treats that thread as a “group” for:
 - session isolation (separate `agent:<agentId>:imessage:group:<chat_id>` session key)
 - group allowlisting / mention gating behavior
 
@@ -151,6 +219,7 @@ This is useful when you want an isolated personality/model for a specific thread
 
 ## Limits
 - Outbound text is chunked to `channels.imessage.textChunkLimit` (default 4000).
+- Optional newline chunking: set `channels.imessage.chunkMode="newline"` to split on blank lines (paragraph boundaries) before length chunking.
 - Media uploads are capped by `channels.imessage.mediaMaxMb` (default 16).
 
 ## Addressing / delivery targets
@@ -172,17 +241,20 @@ Provider options:
 - `channels.imessage.enabled`: enable/disable channel startup.
 - `channels.imessage.cliPath`: path to `imsg`.
 - `channels.imessage.dbPath`: Messages DB path.
+- `channels.imessage.remoteHost`: SSH host for SCP attachment transfer when `cliPath` points to a remote Mac (e.g., `user@gateway-host`). Auto-detected from SSH wrapper if not set.
 - `channels.imessage.service`: `imessage | sms | auto`.
 - `channels.imessage.region`: SMS region.
 - `channels.imessage.dmPolicy`: `pairing | allowlist | open | disabled` (default: pairing).
-- `channels.imessage.allowFrom`: DM allowlist (handles or `chat_id:*`). `open` requires `"*"`.
+- `channels.imessage.allowFrom`: DM allowlist (handles, emails, E.164 numbers, or `chat_id:*`). `open` requires `"*"`. iMessage has no usernames; use handles or chat targets.
 - `channels.imessage.groupPolicy`: `open | allowlist | disabled` (default: allowlist).
 - `channels.imessage.groupAllowFrom`: group sender allowlist.
 - `channels.imessage.historyLimit` / `channels.imessage.accounts.*.historyLimit`: max group messages to include as context (0 disables).
+- `channels.imessage.dmHistoryLimit`: DM history limit in user turns. Per-user overrides: `channels.imessage.dms["<handle>"].historyLimit`.
 - `channels.imessage.groups`: per-group defaults + allowlist (use `"*"` for global defaults).
 - `channels.imessage.includeAttachments`: ingest attachments into context.
 - `channels.imessage.mediaMaxMb`: inbound/outbound media cap (MB).
 - `channels.imessage.textChunkLimit`: outbound chunk size (chars).
+- `channels.imessage.chunkMode`: `length` (default) or `newline` to split on blank lines (paragraph boundaries) before length chunking.
 
 Related global options:
 - `agents.list[].groupChat.mentionPatterns` (or `messages.groupChat.mentionPatterns`).

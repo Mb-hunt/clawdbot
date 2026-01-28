@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { MoltbotConfig } from "../../config/config.js";
 import { resolveTelegramDraftStreamingChunking } from "./draft-chunking.js";
 
 describe("resolveTelegramDraftStreamingChunking", () => {
   it("uses smaller defaults than block streaming", () => {
-    const chunking = resolveTelegramDraftStreamingChunking(
-      undefined,
-      "default",
-    );
+    const chunking = resolveTelegramDraftStreamingChunking(undefined, "default");
     expect(chunking).toEqual({
       minChars: 200,
       maxChars: 800,
@@ -17,7 +14,7 @@ describe("resolveTelegramDraftStreamingChunking", () => {
   });
 
   it("clamps to telegram.textChunkLimit", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       channels: { telegram: { allowFrom: ["*"], textChunkLimit: 150 } },
     };
     const chunking = resolveTelegramDraftStreamingChunking(cfg, "default");
@@ -29,7 +26,7 @@ describe("resolveTelegramDraftStreamingChunking", () => {
   });
 
   it("supports per-account overrides", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       channels: {
         telegram: {
           allowFrom: ["*"],

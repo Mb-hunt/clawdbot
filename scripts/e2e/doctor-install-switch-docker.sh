@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE_NAME="clawdbot-doctor-install-switch-e2e"
+IMAGE_NAME="moltbot-doctor-install-switch-e2e"
 
 echo "Building Docker image..."
 docker build -t "$IMAGE_NAME" -f "$ROOT_DIR/scripts/e2e/Dockerfile" "$ROOT_DIR"
@@ -11,11 +11,16 @@ echo "Running doctor install switch E2E..."
 docker run --rm -t "$IMAGE_NAME" bash -lc '
   set -euo pipefail
 
-  # Stub systemd/loginctl so doctor + daemon flows work in Docker.
-  export PATH="/tmp/clawdbot-bin:$PATH"
-  mkdir -p /tmp/clawdbot-bin
+  # Keep logs focused; the npm global install step can emit noisy deprecation warnings.
+  export npm_config_loglevel=error
+  export npm_config_fund=false
+  export npm_config_audit=false
 
-  cat > /tmp/clawdbot-bin/systemctl <<"SYSTEMCTL"
+  # Stub systemd/loginctl so doctor + daemon flows work in Docker.
+  export PATH="/tmp/moltbot-bin:$PATH"
+  mkdir -p /tmp/moltbot-bin
+
+  cat > /tmp/moltbot-bin/systemctl <<"SYSTEMCTL"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -49,9 +54,9 @@ case "$cmd" in
     ;;
 esac
 SYSTEMCTL
-  chmod +x /tmp/clawdbot-bin/systemctl
+  chmod +x /tmp/moltbot-bin/systemctl
 
-  cat > /tmp/clawdbot-bin/loginctl <<"LOGINCTL"
+  cat > /tmp/moltbot-bin/loginctl <<"LOGINCTL"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -64,14 +69,20 @@ if [[ "$*" == *"enable-linger"* ]]; then
 fi
 exit 0
 LOGINCTL
-  chmod +x /tmp/clawdbot-bin/loginctl
+  chmod +x /tmp/moltbot-bin/loginctl
 
   # Install the npm-global variant from the local /app source.
-  npm install -g --prefix /tmp/npm-prefix /app
+  # `npm pack` can emit script output; keep only the tarball name.
+  pkg_tgz="$(npm pack --silent /app | tail -n 1 | tr -d '\r')"
+  if [ ! -f "/app/$pkg_tgz" ]; then
+    echo "npm pack failed (expected /app/$pkg_tgz)"
+    exit 1
+  fi
+  npm install -g --prefix /tmp/npm-prefix "/app/$pkg_tgz"
 
-  npm_bin="/tmp/npm-prefix/bin/clawdbot"
-  npm_entry="/tmp/npm-prefix/lib/node_modules/clawdbot/dist/entry.js"
-  git_entry="/app/dist/entry.js"
+  npm_bin="/tmp/npm-prefix/bin/moltbot"
+  npm_entry="/tmp/npm-prefix/lib/node_modules/moltbot/moltbot.mjs"
+  git_entry="/app/moltbot.mjs"
 
   assert_entrypoint() {
     local unit_path="$1"
@@ -81,14 +92,16 @@ LOGINCTL
     if [ -z "$exec_line" ]; then
       echo "Missing ExecStart in $unit_path"
       exit 1
-    fi
-    exec_line="${exec_line#ExecStart=}"
-    entrypoint=$(echo "$exec_line" | awk "{print \$2}")
-    if [ "$entrypoint" != "$expected" ]; then
-      echo "Expected entrypoint $expected, got $entrypoint"
-      exit 1
-    fi
-  }
+	    fi
+	    exec_line="${exec_line#ExecStart=}"
+	    entrypoint=$(echo "$exec_line" | awk "{print \$2}")
+	    entrypoint="${entrypoint%\"}"
+	    entrypoint="${entrypoint#\"}"
+	    if [ "$entrypoint" != "$expected" ]; then
+	      echo "Expected entrypoint $expected, got $entrypoint"
+	      exit 1
+	    fi
+	  }
 
   # Each flow: install service with one variant, run doctor from the other,
   # and verify ExecStart entrypoint switches accordingly.
@@ -100,13 +113,13 @@ LOGINCTL
     local doctor_expected="$5"
 
     echo "== Flow: $name =="
-    home_dir=$(mktemp -d "/tmp/clawdbot-switch-${name}.XXXXXX")
+    home_dir=$(mktemp -d "/tmp/moltbot-switch-${name}.XXXXXX")
     export HOME="$home_dir"
     export USER="testuser"
 
     eval "$install_cmd"
 
-    unit_path="$HOME/.config/systemd/user/clawdbot-gateway.service"
+    unit_path="$HOME/.config/systemd/user/moltbot-gateway.service"
     if [ ! -f "$unit_path" ]; then
       echo "Missing unit file: $unit_path"
       exit 1
@@ -122,13 +135,13 @@ LOGINCTL
     "npm-to-git" \
     "$npm_bin daemon install --force" \
     "$npm_entry" \
-    "node $git_entry doctor --repair" \
+    "node $git_entry doctor --repair --force" \
     "$git_entry"
 
   run_flow \
     "git-to-npm" \
     "node $git_entry daemon install --force" \
     "$git_entry" \
-    "$npm_bin doctor --repair" \
+    "$npm_bin doctor --repair --force" \
     "$npm_entry"
 '

@@ -1,6 +1,9 @@
 import type { IncomingMessage } from "node:http";
-import { describe, expect, test } from "vitest";
-import type { ClawdbotConfig } from "../config/config.js";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import type { MoltbotConfig } from "../config/config.js";
+import type { ChannelPlugin } from "../channels/plugins/types.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
+import { createIMessageTestPlugin, createTestRegistry } from "../test-utils/channel-plugins.js";
 import {
   extractHookToken,
   normalizeAgentPayload,
@@ -9,6 +12,13 @@ import {
 } from "./hooks.js";
 
 describe("gateway hooks helpers", () => {
+  beforeEach(() => {
+    setActivePluginRegistry(emptyRegistry);
+  });
+
+  afterEach(() => {
+    setActivePluginRegistry(emptyRegistry);
+  });
   test("resolveHooksConfig normalizes paths + requires token", () => {
     const base = {
       hooks: {
@@ -16,7 +26,7 @@ describe("gateway hooks helpers", () => {
         token: "secret",
         path: "hooks///",
       },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
     const resolved = resolveHooksConfig(base);
     expect(resolved?.basePath).toBe("/hooks");
     expect(resolved?.token).toBe("secret");
@@ -25,7 +35,7 @@ describe("gateway hooks helpers", () => {
   test("resolveHooksConfig rejects root path", () => {
     const cfg = {
       hooks: { enabled: true, token: "x", path: "/" },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
     expect(() => resolveHooksConfig(cfg)).toThrow("hooks.path may not be '/'");
   });
 
@@ -33,19 +43,25 @@ describe("gateway hooks helpers", () => {
     const req = {
       headers: {
         authorization: "Bearer top",
-        "x-clawdbot-token": "header",
+        "x-moltbot-token": "header",
       },
     } as unknown as IncomingMessage;
     const url = new URL("http://localhost/hooks/wake?token=query");
-    expect(extractHookToken(req, url)).toBe("top");
+    const result1 = extractHookToken(req, url);
+    expect(result1.token).toBe("top");
+    expect(result1.fromQuery).toBe(false);
 
     const req2 = {
-      headers: { "x-clawdbot-token": "header" },
+      headers: { "x-moltbot-token": "header" },
     } as unknown as IncomingMessage;
-    expect(extractHookToken(req2, url)).toBe("header");
+    const result2 = extractHookToken(req2, url);
+    expect(result2.token).toBe("header");
+    expect(result2.fromQuery).toBe(false);
 
     const req3 = { headers: {} } as unknown as IncomingMessage;
-    expect(extractHookToken(req3, url)).toBe("query");
+    const result3 = extractHookToken(req3, url);
+    expect(result3.token).toBe("query");
+    expect(result3.fromQuery).toBe(true);
   });
 
   test("normalizeWakePayload trims + validates", () => {
@@ -57,10 +73,7 @@ describe("gateway hooks helpers", () => {
   });
 
   test("normalizeAgentPayload defaults + validates channel", () => {
-    const ok = normalizeAgentPayload(
-      { message: "hello" },
-      { idFactory: () => "fixed" },
-    );
+    const ok = normalizeAgentPayload({ message: "hello" }, { idFactory: () => "fixed" });
     expect(ok.ok).toBe(true);
     if (ok.ok) {
       expect(ok.value.sessionKey).toBe("hook:fixed");
@@ -78,6 +91,15 @@ describe("gateway hooks helpers", () => {
       expect(explicitNoDeliver.value.deliver).toBe(false);
     }
 
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "imessage",
+          source: "test",
+          plugin: createIMessageTestPlugin(),
+        },
+      ]),
+    );
     const imsg = normalizeAgentPayload(
       { message: "yo", channel: "imsg" },
       { idFactory: () => "x" },
@@ -87,6 +109,15 @@ describe("gateway hooks helpers", () => {
       expect(imsg.value.channel).toBe("imessage");
     }
 
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "msteams",
+          source: "test",
+          plugin: createMSTeamsPlugin({ aliases: ["teams"] }),
+        },
+      ]),
+    );
     const teams = normalizeAgentPayload(
       { message: "yo", channel: "teams" },
       { idFactory: () => "x" },
@@ -99,4 +130,23 @@ describe("gateway hooks helpers", () => {
     const bad = normalizeAgentPayload({ message: "yo", channel: "sms" });
     expect(bad.ok).toBe(false);
   });
+});
+
+const emptyRegistry = createTestRegistry([]);
+
+const createMSTeamsPlugin = (params: { aliases?: string[] }): ChannelPlugin => ({
+  id: "msteams",
+  meta: {
+    id: "msteams",
+    label: "Microsoft Teams",
+    selectionLabel: "Microsoft Teams (Bot Framework)",
+    docsPath: "/channels/msteams",
+    blurb: "Bot Framework; enterprise support.",
+    aliases: params.aliases,
+  },
+  capabilities: { chatTypes: ["direct"] },
+  config: {
+    listAccountIds: () => [],
+    resolveAccount: () => ({}),
+  },
 });

@@ -5,17 +5,17 @@ read_when:
 ---
 # Groups
 
-Clawdbot treats group chats consistently across surfaces: WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Microsoft Teams.
+Moltbot treats group chats consistently across surfaces: WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Microsoft Teams.
 
 ## Beginner intro (2 minutes)
-Clawdbot “lives” on your own messaging accounts. There is no separate WhatsApp bot user.
-If **you** are in a group, Clawdbot can see that group and respond there.
+Moltbot “lives” on your own messaging accounts. There is no separate WhatsApp bot user.
+If **you** are in a group, Moltbot can see that group and respond there.
 
 Default behavior:
 - Groups are restricted (`groupPolicy: "allowlist"`).
 - Replies require a mention unless you explicitly disable mention gating.
 
-Translation: allowlisted senders can trigger Clawdbot by mentioning it.
+Translation: allowlisted senders can trigger Moltbot by mentioning it.
 
 > TL;DR
 > - **DM access** is controlled by `*.allowFrom`.
@@ -45,6 +45,70 @@ If you want...
 - Telegram forum topics add `:topic:<threadId>` to the group id so each topic has its own session.
 - Direct chats use the main session (or per-sender if configured).
 - Heartbeats are skipped for group sessions.
+
+## Pattern: personal DMs + public groups (single agent)
+
+Yes — this works well if your “personal” traffic is **DMs** and your “public” traffic is **groups**.
+
+Why: in single-agent mode, DMs typically land in the **main** session key (`agent:main:main`), while groups always use **non-main** session keys (`agent:main:<channel>:group:<id>`). If you enable sandboxing with `mode: "non-main"`, those group sessions run in Docker while your main DM session stays on-host.
+
+This gives you one agent “brain” (shared workspace + memory), but two execution postures:
+- **DMs**: full tools (host)
+- **Groups**: sandbox + restricted tools (Docker)
+
+> If you need truly separate workspaces/personas (“personal” and “public” must never mix), use a second agent + bindings. See [Multi-Agent Routing](/concepts/multi-agent).
+
+Example (DMs on host, groups sandboxed + messaging-only tools):
+
+```json5
+{
+  agents: {
+    defaults: {
+      sandbox: {
+        mode: "non-main", // groups/channels are non-main -> sandboxed
+        scope: "session", // strongest isolation (one container per group/channel)
+        workspaceAccess: "none"
+      }
+    }
+  },
+  tools: {
+    sandbox: {
+      tools: {
+        // If allow is non-empty, everything else is blocked (deny still wins).
+        allow: ["group:messaging", "group:sessions"],
+        deny: ["group:runtime", "group:fs", "group:ui", "nodes", "cron", "gateway"]
+      }
+    }
+  }
+}
+```
+
+Want “groups can only see folder X” instead of “no host access”? Keep `workspaceAccess: "none"` and mount only allowlisted paths into the sandbox:
+
+```json5
+{
+  agents: {
+    defaults: {
+      sandbox: {
+        mode: "non-main",
+        scope: "session",
+        workspaceAccess: "none",
+        docker: {
+          binds: [
+            // hostPath:containerPath:mode
+            "~/FriendsShared:/data:ro"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Related:
+- Configuration keys and defaults: [Gateway configuration](/gateway/configuration#agentsdefaultssandbox)
+- Debugging why a tool is blocked: [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated)
+- Bind mounts details: [Sandboxing](/gateway/sandboxing#custom-bind-mounts)
 
 ## Display labels
 - UI labels use `displayName` when available, formatted as `<channel>:<token>`.
@@ -85,6 +149,14 @@ Control how group/room messages are handled per channel:
     slack: {
       groupPolicy: "allowlist",
       channels: { "#general": { allow: true } }
+    },
+    matrix: {
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["@owner:example.org"],
+      groups: {
+        "!roomId:example.org": { allow: true },
+        "#alias:example.org": { allow: true }
+      }
     }
   }
 }
@@ -101,6 +173,7 @@ Notes:
 - WhatsApp/Telegram/Signal/iMessage/Microsoft Teams: use `groupAllowFrom` (fallback: explicit `allowFrom`).
 - Discord: allowlist uses `channels.discord.guilds.<id>.channels`.
 - Slack: allowlist uses `channels.slack.channels`.
+- Matrix: allowlist uses `channels.matrix.groups` (room IDs, aliases, or names). Use `channels.matrix.groupAllowFrom` to restrict senders; per-room `users` allowlists are also supported.
 - Group DMs are controlled separately (`channels.discord.dm.*`, `channels.slack.dm.*`).
 - Telegram allowlist can match user IDs (`"123456789"`, `"telegram:123456789"`, `"tg:123456789"`) or usernames (`"@alice"` or `"alice"`); prefixes are case-insensitive.
 - Default is `groupPolicy: "allowlist"`; if your group allowlist is empty, group messages are blocked.
@@ -112,6 +185,8 @@ Quick mental model (evaluation order for group messages):
 
 ## Mention gating (default)
 Group messages require a mention unless overridden per group. Defaults live per subsystem under `*.groups."*"`.
+
+Replying to a bot message counts as an implicit mention (when the channel supports reply metadata). This applies to Telegram, WhatsApp, Slack, Discord, and Microsoft Teams.
 
 ```json5
 {
@@ -140,7 +215,7 @@ Group messages require a mention unless overridden per group. Defaults live per 
       {
         id: "main",
         groupChat: {
-          mentionPatterns: ["@clawd", "clawdbot", "\\+15555550123"],
+          mentionPatterns: ["@clawd", "moltbot", "\\+15555550123"],
           historyLimit: 50
         }
       }
@@ -155,7 +230,43 @@ Notes:
 - Per-agent override: `agents.list[].groupChat.mentionPatterns` (useful when multiple agents share a group).
 - Mention gating is only enforced when mention detection is possible (native mentions or `mentionPatterns` are configured).
 - Discord defaults live in `channels.discord.guilds."*"` (overridable per guild/channel).
-- Group history context is wrapped uniformly across channels; use `messages.groupChat.historyLimit` for the global default and `channels.<channel>.historyLimit` (or `channels.<channel>.accounts.*.historyLimit`) for overrides. Set `0` to disable.
+- Group history context is wrapped uniformly across channels and is **pending-only** (messages skipped due to mention gating); use `messages.groupChat.historyLimit` for the global default and `channels.<channel>.historyLimit` (or `channels.<channel>.accounts.*.historyLimit`) for overrides. Set `0` to disable.
+
+## Group/channel tool restrictions (optional)
+Some channel configs support restricting which tools are available **inside a specific group/room/channel**.
+
+- `tools`: allow/deny tools for the whole group.
+- `toolsBySender`: per-sender overrides within the group (keys are sender IDs/usernames/emails/phone numbers depending on the channel). Use `"*"` as a wildcard.
+
+Resolution order (most specific wins):
+1) group/channel `toolsBySender` match
+2) group/channel `tools`
+3) default (`"*"`) `toolsBySender` match
+4) default (`"*"`) `tools`
+
+Example (Telegram):
+
+```json5
+{
+  channels: {
+    telegram: {
+      groups: {
+        "*": { tools: { deny: ["exec"] } },
+        "-1001234567890": {
+          tools: { deny: ["exec", "read", "write"] },
+          toolsBySender: {
+            "123456789": { alsoAllow: ["exec"] }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Group/channel tool restrictions are applied in addition to global/agent tool policy (deny still wins).
+- Some channels use different nesting for rooms/channels (e.g., Discord `guilds.*.channels.*`, Slack `channels.*`, MS Teams `teams.*.channels.*`).
 
 ## Group allowlists
 When `channels.whatsapp.groups`, `channels.telegram.groups`, or `channels.imessage.groups` is configured, the keys act as a group allowlist. Use `"*"` to allow all groups while still setting default mention behavior.

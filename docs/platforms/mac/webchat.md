@@ -18,14 +18,14 @@ agent (with a session switcher for other sessions).
 - Manual: Lobster menu → “Open Chat”.
 - Auto‑open for testing:
   ```bash
-  dist/Clawdbot.app/Contents/MacOS/Clawdbot --webchat
+  dist/Moltbot.app/Contents/MacOS/Moltbot --webchat
   ```
-- Logs: `./scripts/clawlog.sh` (subsystem `com.clawdbot`, category `WebChatSwiftUI`).
+- Logs: `./scripts/clawlog.sh` (subsystem `bot.molt`, category `WebChatSwiftUI`).
 
 ## How it’s wired
 
-- Data plane: Gateway WS methods `chat.history`, `chat.send`, `chat.abort` and
-  events `chat`, `agent`, `presence`, `tick`, `health`.
+- Data plane: Gateway WS methods `chat.history`, `chat.send`, `chat.abort`,
+  `chat.inject` and events `chat`, `agent`, `presence`, `tick`, `health`.
 - Session: defaults to the primary session (`main`, or `global` when scope is
   global). The UI can switch between sessions.
 - Onboarding uses a dedicated session to keep first‑run setup separate.

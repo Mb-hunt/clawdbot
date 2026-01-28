@@ -1,5 +1,5 @@
 import type { NormalizedUsage } from "../agents/usage.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 
 export type ModelCostConfig = {
   input: number;
@@ -20,8 +20,7 @@ export function formatTokenCount(value?: number): string {
   if (value === undefined || !Number.isFinite(value)) return "0";
   const safe = Math.max(0, value);
   if (safe >= 1_000_000) return `${(safe / 1_000_000).toFixed(1)}m`;
-  if (safe >= 1_000)
-    return `${(safe / 1_000).toFixed(safe >= 10_000 ? 0 : 1)}k`;
+  if (safe >= 1_000) return `${(safe / 1_000).toFixed(safe >= 10_000 ? 0 : 1)}k`;
   return String(Math.round(safe));
 }
 
@@ -35,7 +34,7 @@ export function formatUsd(value?: number): string | undefined {
 export function resolveModelCostConfig(params: {
   provider?: string;
   model?: string;
-  config?: ClawdbotConfig;
+  config?: MoltbotConfig;
 }): ModelCostConfig | undefined {
   const provider = params.provider?.trim();
   const model = params.model?.trim();

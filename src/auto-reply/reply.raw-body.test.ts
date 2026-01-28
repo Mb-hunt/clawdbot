@@ -9,8 +9,7 @@ vi.mock("../agents/pi-embedded.js", () => ({
   abortEmbeddedPiRun: vi.fn().mockReturnValue(false),
   runEmbeddedPiAgent: vi.fn(),
   queueEmbeddedPiMessage: vi.fn().mockReturnValue(false),
-  resolveEmbeddedSessionLane: (key: string) =>
-    `session:${key.trim() || "main"}`,
+  resolveEmbeddedSessionLane: (key: string) => `session:${key.trim() || "main"}`,
   isEmbeddedPiRunActive: vi.fn().mockReturnValue(false),
   isEmbeddedPiRunStreaming: vi.fn().mockReturnValue(false),
 }));
@@ -28,7 +27,7 @@ async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
         CLAWDBOT_AGENT_DIR: (home) => path.join(home, ".clawdbot", "agent"),
         PI_CODING_AGENT_DIR: (home) => path.join(home, ".clawdbot", "agent"),
       },
-      prefix: "clawdbot-rawbody-",
+      prefix: "moltbot-rawbody-",
     },
   );
 }
@@ -55,6 +54,7 @@ describe("RawBody directive parsing", () => {
         From: "+1222",
         To: "+1222",
         ChatType: "group",
+        CommandAuthorized: true,
       };
 
       const res = await getReplyFromConfig(
@@ -88,6 +88,7 @@ describe("RawBody directive parsing", () => {
         From: "+1222",
         To: "+1222",
         ChatType: "group",
+        CommandAuthorized: true,
       };
 
       const res = await getReplyFromConfig(
@@ -124,6 +125,7 @@ describe("RawBody directive parsing", () => {
         From: "+1222",
         To: "+1222",
         ChatType: "group",
+        CommandAuthorized: true,
       };
 
       const res = await getReplyFromConfig(
@@ -157,10 +159,11 @@ describe("RawBody directive parsing", () => {
         ChatType: "group",
         From: "+1222",
         To: "+1222",
-        SessionKey: "agent:main:whatsapp:group:G1",
+        SessionKey: "agent:main:whatsapp:group:g1",
         Provider: "whatsapp",
         Surface: "whatsapp",
         SenderE164: "+1222",
+        CommandAuthorized: true,
       };
 
       const res = await getReplyFromConfig(
@@ -179,7 +182,7 @@ describe("RawBody directive parsing", () => {
       );
 
       const text = Array.isArray(res) ? res[0]?.text : res?.text;
-      expect(text).toContain("Session: agent:main:whatsapp:group:G1");
+      expect(text).toContain("Session: agent:main:whatsapp:group:g1");
       expect(text).toContain("anthropic/claude-opus-4-5");
       expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
     });
@@ -208,6 +211,7 @@ describe("RawBody directive parsing", () => {
         From: "+1222",
         To: "+1222",
         ChatType: "group",
+        CommandAuthorized: true,
       };
 
       const res = await getReplyFromConfig(
@@ -228,11 +232,8 @@ describe("RawBody directive parsing", () => {
       const text = Array.isArray(res) ? res[0]?.text : res?.text;
       expect(text).toBe("ok");
       expect(runEmbeddedPiAgent).toHaveBeenCalledOnce();
-      const prompt =
-        vi.mocked(runEmbeddedPiAgent).mock.calls[0]?.[0]?.prompt ?? "";
-      expect(prompt).toContain(
-        "[Chat messages since your last reply - for context]",
-      );
+      const prompt = vi.mocked(runEmbeddedPiAgent).mock.calls[0]?.[0]?.prompt ?? "";
+      expect(prompt).toContain("[Chat messages since your last reply - for context]");
       expect(prompt).toContain("Peter: hello");
       expect(prompt).toContain("status please");
       expect(prompt).not.toContain("/think:high");

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveClawdbotPackageRoot } from "../infra/clawdbot-root.js";
+import { resolveMoltbotPackageRoot } from "../infra/moltbot-root.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { note } from "../terminal/note.js";
@@ -10,7 +10,7 @@ export async function maybeRepairUiProtocolFreshness(
   _runtime: RuntimeEnv,
   prompter: DoctorPrompter,
 ) {
-  const root = await resolveClawdbotPackageRoot({
+  const root = await resolveMoltbotPackageRoot({
     moduleUrl: import.meta.url,
     argv1: process.argv[1],
     cwd: process.cwd(),
@@ -28,10 +28,16 @@ export async function maybeRepairUiProtocolFreshness(
     ]);
 
     if (schemaStats && !uiStats) {
-      note(
-        ["- Control UI assets are missing.", "- Run: pnpm ui:build"].join("\n"),
-        "UI",
-      );
+      note(["- Control UI assets are missing.", "- Run: pnpm ui:build"].join("\n"), "UI");
+
+      // In slim/docker environments we may not have the UI source tree. Trying
+      // to build would fail (and spam logs), so skip the interactive repair.
+      const uiSourcesPath = path.join(root, "ui/package.json");
+      const uiSourcesExist = await fs.stat(uiSourcesPath).catch(() => null);
+      if (!uiSourcesExist) {
+        note("Skipping UI build: ui/ sources not present.", "UI");
+        return;
+      }
 
       const shouldRepair = await prompter.confirmRepair({
         message: "Build Control UI assets now?",
@@ -41,14 +47,11 @@ export async function maybeRepairUiProtocolFreshness(
       if (shouldRepair) {
         note("Building Control UI assets... (this may take a moment)", "UI");
         const uiScriptPath = path.join(root, "scripts/ui.js");
-        const buildResult = await runCommandWithTimeout(
-          [process.execPath, uiScriptPath, "build"],
-          {
-            cwd: root,
-            timeoutMs: 120_000,
-            env: { ...process.env, FORCE_COLOR: "1" },
-          },
-        );
+        const buildResult = await runCommandWithTimeout([process.execPath, uiScriptPath, "build"], {
+          cwd: root,
+          timeoutMs: 120_000,
+          env: { ...process.env, FORCE_COLOR: "1" },
+        });
         if (buildResult.code === 0) {
           note("UI build complete.", "UI");
         } else {
@@ -93,12 +96,18 @@ export async function maybeRepairUiProtocolFreshness(
         );
 
         const shouldRepair = await prompter.confirmAggressive({
-          message:
-            "Rebuild UI now? (Detected protocol mismatch requiring update)",
+          message: "Rebuild UI now? (Detected protocol mismatch requiring update)",
           initialValue: true,
         });
 
         if (shouldRepair) {
+          const uiSourcesPath = path.join(root, "ui/package.json");
+          const uiSourcesExist = await fs.stat(uiSourcesPath).catch(() => null);
+          if (!uiSourcesExist) {
+            note("Skipping UI rebuild: ui/ sources not present.", "UI");
+            return;
+          }
+
           note("Rebuilding stale UI assets... (this may take a moment)", "UI");
           // Use scripts/ui.js to build, assuming node is available as we are running in it.
           // We use the same node executable to run the script.

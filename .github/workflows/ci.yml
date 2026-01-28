@@ -32,19 +32,28 @@ jobs:
           node-version: 22.x
           check-latest: true
 
+      - name: Setup pnpm (corepack retry)
+        run: |
+          set -euo pipefail
+          corepack enable
+          for attempt in 1 2 3; do
+            if corepack prepare pnpm@10.23.0 --activate; then
+              pnpm -v
+              exit 0
+            fi
+            echo "corepack prepare failed (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Runtime versions
         run: |
           node -v
           npm -v
+          pnpm -v
 
       - name: Capture node path
         run: echo "NODE_BIN=$(dirname \"$(node -p \"process.execPath\")\")" >> "$GITHUB_ENV"
-
-      - name: Enable corepack and pin pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.23.0 --activate
-          pnpm -v
 
       - name: Install dependencies (frozen)
         env:
@@ -67,19 +76,19 @@ jobs:
             command: pnpm lint
           - runtime: node
             task: test
-            command: pnpm test
+            command: pnpm canvas:a2ui:bundle && pnpm test
           - runtime: node
             task: build
             command: pnpm build
           - runtime: node
             task: protocol
             command: pnpm protocol:check
-          - runtime: bun
-            task: lint
-            command: bunx biome check src
+          - runtime: node
+            task: format
+            command: pnpm format
           - runtime: bun
             task: test
-            command: bunx vitest run
+            command: pnpm canvas:a2ui:bundle && bunx vitest run
           - runtime: bun
             task: build
             command: bunx tsc -p tsconfig.json
@@ -108,6 +117,20 @@ jobs:
           node-version: 22.x
           check-latest: true
 
+      - name: Setup pnpm (corepack retry)
+        run: |
+          set -euo pipefail
+          corepack enable
+          for attempt in 1 2 3; do
+            if corepack prepare pnpm@10.23.0 --activate; then
+              pnpm -v
+              exit 0
+            fi
+            echo "corepack prepare failed (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -118,15 +141,10 @@ jobs:
           node -v
           npm -v
           bun -v
+          pnpm -v
 
       - name: Capture node path
         run: echo "NODE_BIN=$(dirname \"$(node -p \"process.execPath\")\")" >> "$GITHUB_ENV"
-
-      - name: Enable corepack and pin pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.23.0 --activate
-          pnpm -v
 
       - name: Install dependencies
         env:
@@ -141,8 +159,36 @@ jobs:
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         run: ${{ matrix.command }}
 
+  secrets:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install detect-secrets
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install detect-secrets==1.5.0
+
+      - name: Detect secrets
+        run: |
+          if ! detect-secrets scan --baseline .secrets.baseline; then
+            echo "::error::Secret scanning failed. See docs/gateway/security.md#secret-scanning-detect-secrets"
+            exit 1
+          fi
+
   checks-windows:
     runs-on: blacksmith-4vcpu-windows-2025
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      CLAWDBOT_TEST_WORKERS: 1
     defaults:
       run:
         shell: bash
@@ -155,7 +201,7 @@ jobs:
             command: pnpm lint
           - runtime: node
             task: test
-            command: pnpm test
+            command: pnpm canvas:a2ui:bundle && pnpm test
           - runtime: node
             task: build
             command: pnpm build
@@ -187,6 +233,20 @@ jobs:
           node-version: 22.x
           check-latest: true
 
+      - name: Setup pnpm (corepack retry)
+        run: |
+          set -euo pipefail
+          corepack enable
+          for attempt in 1 2 3; do
+            if corepack prepare pnpm@10.23.0 --activate; then
+              pnpm -v
+              exit 0
+            fi
+            echo "corepack prepare failed (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -197,15 +257,10 @@ jobs:
           node -v
           npm -v
           bun -v
+          pnpm -v
 
       - name: Capture node path
         run: echo "NODE_BIN=$(dirname \"$(node -p \"process.execPath\")\")" >> "$GITHUB_ENV"
-
-      - name: Enable corepack and pin pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.23.0 --activate
-          pnpm -v
 
       - name: Install dependencies
         env:
@@ -254,19 +309,28 @@ jobs:
           node-version: 22.x
           check-latest: true
 
+      - name: Setup pnpm (corepack retry)
+        run: |
+          set -euo pipefail
+          corepack enable
+          for attempt in 1 2 3; do
+            if corepack prepare pnpm@10.23.0 --activate; then
+              pnpm -v
+              exit 0
+            fi
+            echo "corepack prepare failed (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Runtime versions
         run: |
           node -v
           npm -v
+          pnpm -v
 
       - name: Capture node path
         run: echo "NODE_BIN=$(dirname \"$(node -p \"process.execPath\")\")" >> "$GITHUB_ENV"
-
-      - name: Enable corepack and pin pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.23.0 --activate
-          pnpm -v
 
       - name: Install dependencies
         env:
@@ -279,6 +343,8 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true || pnpm install --frozen-lockfile --ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true
 
       - name: Run ${{ matrix.task }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: ${{ matrix.command }}
 
   macos-app:
@@ -565,6 +631,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
 
       - name: Install Android SDK packages
         run: |

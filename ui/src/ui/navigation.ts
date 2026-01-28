@@ -1,8 +1,10 @@
+import type { IconName } from "./icons.js";
+
 export const TAB_GROUPS = [
   { label: "Chat", tabs: ["chat"] },
   {
     label: "Control",
-    tabs: ["overview", "connections", "instances", "sessions", "cron"],
+    tabs: ["overview", "channels", "instances", "sessions", "cron"],
   },
   { label: "Agent", tabs: ["skills", "nodes"] },
   { label: "Settings", tabs: ["config", "debug", "logs"] },
@@ -10,7 +12,7 @@ export const TAB_GROUPS = [
 
 export type Tab =
   | "overview"
-  | "connections"
+  | "channels"
   | "instances"
   | "sessions"
   | "cron"
@@ -23,7 +25,7 @@ export type Tab =
 
 const TAB_PATHS: Record<Tab, string> = {
   overview: "/overview",
-  connections: "/connections",
+  channels: "/channels",
   instances: "/instances",
   sessions: "/sessions",
   cron: "/cron",
@@ -98,32 +100,32 @@ export function inferBasePathFromPathname(pathname: string): string {
   return `/${segments.join("/")}`;
 }
 
-export function iconForTab(tab: Tab): string {
+export function iconForTab(tab: Tab): IconName {
   switch (tab) {
     case "chat":
-      return "💬";
+      return "messageSquare";
     case "overview":
-      return "📊";
-    case "connections":
-      return "🔗";
+      return "barChart";
+    case "channels":
+      return "link";
     case "instances":
-      return "📡";
+      return "radio";
     case "sessions":
-      return "📄";
+      return "fileText";
     case "cron":
-      return "⏰";
+      return "loader";
     case "skills":
-      return "⚡️";
+      return "zap";
     case "nodes":
-      return "🖥️";
+      return "monitor";
     case "config":
-      return "⚙️";
+      return "settings";
     case "debug":
-      return "🐞";
+      return "bug";
     case "logs":
-      return "🧾";
+      return "scrollText";
     default:
-      return "📁";
+      return "folder";
   }
 }
 
@@ -131,8 +133,8 @@ export function titleForTab(tab: Tab) {
   switch (tab) {
     case "overview":
       return "Overview";
-    case "connections":
-      return "Connections";
+    case "channels":
+      return "Channels";
     case "instances":
       return "Instances";
     case "sessions":
@@ -160,8 +162,8 @@ export function subtitleForTab(tab: Tab) {
   switch (tab) {
     case "overview":
       return "Gateway status, entry points, and a fast health read.";
-    case "connections":
-      return "Link channels and keep transport settings in sync.";
+    case "channels":
+      return "Manage channels and settings.";
     case "instances":
       return "Presence beacons from connected clients and nodes.";
     case "sessions":
@@ -175,7 +177,7 @@ export function subtitleForTab(tab: Tab) {
     case "chat":
       return "Direct gateway chat session for quick interventions.";
     case "config":
-      return "Edit ~/.clawdbot/clawdbot.json safely.";
+      return "Edit ~/.clawdbot/moltbot.json safely.";
     case "debug":
       return "Gateway snapshots, events, and manual RPC calls.";
     case "logs":

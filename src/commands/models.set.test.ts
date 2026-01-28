@@ -5,7 +5,7 @@ const writeConfigFile = vi.fn().mockResolvedValue(undefined);
 const loadConfig = vi.fn().mockReturnValue({});
 
 vi.mock("../config/config.js", () => ({
-  CONFIG_PATH_CLAWDBOT: "/tmp/clawdbot.json",
+  CONFIG_PATH: "/tmp/moltbot.json",
   readConfigFileSnapshot,
   writeConfigFile,
   loadConfig,
@@ -19,7 +19,7 @@ describe("models set + fallbacks", () => {
 
   it("normalizes z.ai provider in models set", async () => {
     readConfigFileSnapshot.mockResolvedValue({
-      path: "/tmp/clawdbot.json",
+      path: "/tmp/moltbot.json",
       exists: true,
       raw: "{}",
       parsed: {},
@@ -35,10 +35,7 @@ describe("models set + fallbacks", () => {
     await modelsSetCommand("z.ai/glm-4.7", runtime);
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
-    const written = writeConfigFile.mock.calls[0]?.[0] as Record<
-      string,
-      unknown
-    >;
+    const written = writeConfigFile.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(written.agents).toEqual({
       defaults: {
         model: { primary: "zai/glm-4.7" },
@@ -49,7 +46,7 @@ describe("models set + fallbacks", () => {
 
   it("normalizes z-ai provider in models fallbacks add", async () => {
     readConfigFileSnapshot.mockResolvedValue({
-      path: "/tmp/clawdbot.json",
+      path: "/tmp/moltbot.json",
       exists: true,
       raw: "{}",
       parsed: {},
@@ -65,10 +62,7 @@ describe("models set + fallbacks", () => {
     await modelsFallbacksAddCommand("z-ai/glm-4.7", runtime);
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
-    const written = writeConfigFile.mock.calls[0]?.[0] as Record<
-      string,
-      unknown
-    >;
+    const written = writeConfigFile.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(written.agents).toEqual({
       defaults: {
         model: { fallbacks: ["zai/glm-4.7"] },
@@ -79,7 +73,7 @@ describe("models set + fallbacks", () => {
 
   it("normalizes provider casing in models set", async () => {
     readConfigFileSnapshot.mockResolvedValue({
-      path: "/tmp/clawdbot.json",
+      path: "/tmp/moltbot.json",
       exists: true,
       raw: "{}",
       parsed: {},
@@ -95,10 +89,7 @@ describe("models set + fallbacks", () => {
     await modelsSetCommand("Z.AI/glm-4.7", runtime);
 
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
-    const written = writeConfigFile.mock.calls[0]?.[0] as Record<
-      string,
-      unknown
-    >;
+    const written = writeConfigFile.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(written.agents).toEqual({
       defaults: {
         model: { primary: "zai/glm-4.7" },

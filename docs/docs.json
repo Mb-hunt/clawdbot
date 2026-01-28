@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "Clawdbot",
+  "name": "Moltbot",
   "theme": "mint",
   "logo": {
     "light": "/assets/pixel-lobster.svg",
@@ -13,11 +13,11 @@
   "topbarLinks": [
     {
       "name": "GitHub",
-      "url": "https://github.com/clawdbot/clawdbot"
+      "url": "https://github.com/moltbot/moltbot"
     },
     {
       "name": "Releases",
-      "url": "https://github.com/clawdbot/clawdbot/releases"
+      "url": "https://github.com/moltbot/moltbot/releases"
     }
   ],
   "redirects": [
@@ -44,6 +44,22 @@
     {
       "source": "/messages/",
       "destination": "/concepts/messages"
+    },
+    {
+      "source": "/context",
+      "destination": "/concepts/context"
+    },
+    {
+      "source": "/context/",
+      "destination": "/concepts/context"
+    },
+    {
+      "source": "/compaction",
+      "destination": "/concepts/compaction"
+    },
+    {
+      "source": "/compaction/",
+      "destination": "/concepts/compaction"
     },
     {
       "source": "/minimax",
@@ -94,6 +110,22 @@
       "destination": "/providers/opencode"
     },
     {
+      "source": "/mattermost",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/mattermost/",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/line",
+      "destination": "/channels/line"
+    },
+    {
+      "source": "/line/",
+      "destination": "/channels/line"
+    },
+    {
       "source": "/glm",
       "destination": "/providers/glm"
     },
@@ -126,6 +158,14 @@
       "destination": "/channels/discord"
     },
     {
+      "source": "/providers/googlechat",
+      "destination": "/channels/googlechat"
+    },
+    {
+      "source": "/providers/googlechat/",
+      "destination": "/channels/googlechat"
+    },
+    {
       "source": "/providers/grammy",
       "destination": "/channels/grammy"
     },
@@ -150,12 +190,28 @@
       "destination": "/channels/location"
     },
     {
+      "source": "/providers/mattermost",
+      "destination": "/channels/mattermost"
+    },
+    {
+      "source": "/providers/mattermost/",
+      "destination": "/channels/mattermost"
+    },
+    {
       "source": "/providers/msteams",
       "destination": "/channels/msteams"
     },
     {
       "source": "/providers/msteams/",
       "destination": "/channels/msteams"
+    },
+    {
+      "source": "/providers/line",
+      "destination": "/channels/line"
+    },
+    {
+      "source": "/providers/line/",
+      "destination": "/channels/line"
     },
     {
       "source": "/providers/signal",
@@ -190,6 +246,14 @@
       "destination": "/channels/troubleshooting"
     },
     {
+      "source": "/providers/zalo",
+      "destination": "/channels/zalo"
+    },
+    {
+      "source": "/providers/zalo/",
+      "destination": "/channels/zalo"
+    },
+    {
       "source": "/providers/whatsapp",
       "destination": "/channels/whatsapp"
     },
@@ -204,6 +268,14 @@
     {
       "source": "/sandbox/",
       "destination": "/cli/sandbox"
+    },
+    {
+      "source": "/sandboxing",
+      "destination": "/gateway/sandboxing"
+    },
+    {
+      "source": "/sandboxing/",
+      "destination": "/gateway/sandboxing"
     },
     {
       "source": "/AGENTS.default",
@@ -274,10 +346,6 @@
       "destination": "/automation/auth-monitoring"
     },
     {
-      "source": "/scripts",
-      "destination": "/scripts"
-    },
-    {
       "source": "/camera",
       "destination": "/nodes/camera"
     },
@@ -300,6 +368,14 @@
     {
       "source": "/cron-jobs",
       "destination": "/automation/cron-jobs"
+    },
+    {
+      "source": "/cron-vs-heartbeat",
+      "destination": "/automation/cron-vs-heartbeat"
+    },
+    {
+      "source": "/cron-vs-heartbeat/",
+      "destination": "/automation/cron-vs-heartbeat"
     },
     {
       "source": "/dashboard",
@@ -331,7 +407,7 @@
     },
     {
       "source": "/faq",
-      "destination": "/start/faq"
+      "destination": "/help/faq"
     },
     {
       "source": "/gateway-lock",
@@ -392,10 +468,6 @@
     {
       "source": "/location-command",
       "destination": "/nodes/location-command"
-    },
-    {
-      "source": "/logging",
-      "destination": "/gateway/logging"
     },
     {
       "source": "/lore",
@@ -542,14 +614,6 @@
       "destination": "/concepts/channel-routing"
     },
     {
-      "source": "/refactor/provider-plugin",
-      "destination": "/refactor/channel-plugin"
-    },
-    {
-      "source": "/refactor/provider-plugin/",
-      "destination": "/refactor/channel-plugin"
-    },
-    {
       "source": "/queue",
       "destination": "/concepts/queue"
     },
@@ -634,6 +698,10 @@
       "destination": "/reference/templates/AGENTS"
     },
     {
+      "source": "/templates/BOOT",
+      "destination": "/reference/templates/BOOT"
+    },
+    {
       "source": "/templates/BOOTSTRAP",
       "destination": "/reference/templates/BOOTSTRAP"
     },
@@ -710,12 +778,40 @@
       "destination": "/start/wizard"
     },
     {
+      "source": "/start/faq",
+      "destination": "/help/faq"
+    },
+    {
+      "source": "/start/faq/",
+      "destination": "/help/faq"
+    },
+    {
       "source": "/oauth",
       "destination": "/concepts/oauth"
     },
     {
       "source": "/plugins",
       "destination": "/plugin"
+    },
+    {
+      "source": "/install/railway",
+      "destination": "/railway"
+    },
+    {
+      "source": "/install/railway/",
+      "destination": "/railway"
+    },
+    {
+      "source": "/install/northflank/",
+      "destination": "/northflank"
+    },
+    {
+      "source": "/gcp",
+      "destination": "/platforms/gcp"
+    },
+    {
+      "source": "/gcp/",
+      "destination": "/platforms/gcp"
     }
   ],
   "navigation": {
@@ -728,7 +824,6 @@
           "start/wizard",
           "start/setup",
           "start/pairing",
-          "start/faq",
           "start/clawd",
           "start/showcase",
           "start/hubs",
@@ -737,14 +832,27 @@
         ]
       },
       {
+        "group": "Help",
+        "pages": [
+          "help/index",
+          "help/troubleshooting",
+          "help/faq"
+        ]
+      },
+      {
         "group": "Install & Updates",
         "pages": [
           "install/index",
           "install/installer",
           "install/updating",
+          "install/development-channels",
+          "install/uninstall",
           "install/ansible",
           "install/nix",
           "install/docker",
+          "railway",
+          "render",
+          "northflank",
           "install/bun"
         ]
       },
@@ -752,8 +860,39 @@
         "group": "CLI",
         "pages": [
           "cli/index",
+          "cli/setup",
+          "cli/onboard",
+          "cli/configure",
+          "cli/doctor",
+          "cli/dashboard",
+          "cli/reset",
+          "cli/uninstall",
+          "cli/browser",
           "cli/message",
+          "cli/agent",
+          "cli/agents",
+          "cli/status",
+          "cli/health",
+          "cli/sessions",
+          "cli/channels",
+          "cli/directory",
+          "cli/skills",
+          "cli/plugins",
+          "cli/memory",
+          "cli/models",
+          "cli/logs",
+          "cli/system",
+          "cli/nodes",
+          "cli/approvals",
           "cli/gateway",
+          "cli/tui",
+          "cli/voicecall",
+          "cli/cron",
+          "cli/dns",
+          "cli/docs",
+          "cli/hooks",
+          "cli/pairing",
+          "cli/security",
           "cli/update",
           "cli/sandbox"
         ]
@@ -765,6 +904,7 @@
           "concepts/agent",
           "concepts/agent-loop",
           "concepts/system-prompt",
+          "concepts/context",
           "token-use",
           "concepts/oauth",
           "concepts/agent-workspace",
@@ -779,6 +919,7 @@
           "concepts/channel-routing",
           "concepts/messages",
           "concepts/streaming",
+          "concepts/markdown-formatting",
           "concepts/groups",
           "concepts/group-messages",
           "concepts/typing-indicators",
@@ -802,15 +943,20 @@
           "gateway/gateway-lock",
           "environment",
           "gateway/configuration",
+          "gateway/multiple-gateways",
           "gateway/configuration-examples",
           "gateway/authentication",
           "gateway/openai-http-api",
+          "gateway/tools-invoke-http-api",
+          "gateway/cli-backends",
+          "gateway/local-models",
           "gateway/background-process",
           "gateway/health",
           "gateway/heartbeat",
           "gateway/doctor",
           "gateway/logging",
           "gateway/security",
+          "security/formal-verification",
           "gateway/sandbox-vs-tool-policy-vs-elevated",
           "gateway/sandboxing",
           "gateway/troubleshooting",
@@ -841,9 +987,15 @@
           "channels/grammy",
           "channels/discord",
           "channels/slack",
+          "channels/googlechat",
+          "channels/mattermost",
           "channels/signal",
           "channels/imessage",
           "channels/msteams",
+          "channels/line",
+          "channels/matrix",
+          "channels/zalo",
+          "channels/zalouser",
           "broadcast-groups",
           "channels/troubleshooting",
           "channels/location"
@@ -856,9 +1008,12 @@
           "providers/models",
           "providers/openai",
           "providers/anthropic",
+          "bedrock",
           "providers/moonshot",
           "providers/minimax",
+          "providers/vercel-ai-gateway",
           "providers/openrouter",
+          "providers/synthetic",
           "providers/opencode",
           "providers/glm",
           "providers/zai"
@@ -867,10 +1022,13 @@
       {
         "group": "Automation & Hooks",
         "pages": [
+          "hooks",
+          "hooks/soul-evil",
           "automation/auth-monitoring",
           "automation/webhook",
           "automation/gmail-pubsub",
           "automation/cron-jobs",
+          "automation/cron-vs-heartbeat",
           "automation/poll"
         ]
       },
@@ -878,11 +1036,18 @@
         "group": "Tools & Skills",
         "pages": [
           "tools",
+          "tools/lobster",
+          "tools/llm-task",
           "plugin",
+          "plugins/voice-call",
+          "plugins/zalouser",
           "tools/exec",
+          "tools/web",
           "tools/apply-patch",
           "tools/elevated",
           "tools/browser",
+          "tools/browser-login",
+          "tools/chrome-extension",
           "tools/browser-linux-troubleshooting",
           "tools/slash-commands",
           "tools/thinking",
@@ -912,11 +1077,14 @@
         "pages": [
           "platforms",
           "platforms/macos",
+          "platforms/macos-vm",
           "platforms/ios",
           "platforms/android",
           "platforms/windows",
           "platforms/linux",
+          "platforms/fly",
           "platforms/hetzner",
+          "platforms/gcp",
           "platforms/exe-dev"
         ]
       },
@@ -955,22 +1123,13 @@
           "reference/RELEASING",
           "reference/AGENTS.default",
           "reference/templates/AGENTS",
+          "reference/templates/BOOT",
           "reference/templates/BOOTSTRAP",
           "reference/templates/HEARTBEAT",
           "reference/templates/IDENTITY",
           "reference/templates/SOUL",
           "reference/templates/TOOLS",
           "reference/templates/USER"
-        ]
-      },
-      {
-        "group": "Experiments & Proposals",
-        "pages": [
-          "experiments/onboarding-config-protocol",
-          "experiments/plans/cron-add-hardening",
-          "experiments/plans/group-policy-hardening",
-          "experiments/proposals/model-config",
-          "experiments/research/memory"
         ]
       }
     ]

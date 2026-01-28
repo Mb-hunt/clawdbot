@@ -1,9 +1,6 @@
 import { listChannelPlugins } from "../channels/plugins/index.js";
-import type {
-  ChannelAccountSnapshot,
-  ChannelPlugin,
-} from "../channels/plugins/types.js";
-import { type ClawdbotConfig, loadConfig } from "../config/config.js";
+import type { ChannelAccountSnapshot, ChannelPlugin } from "../channels/plugins/types.js";
+import { type MoltbotConfig, loadConfig } from "../config/config.js";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 import { theme } from "../terminal/theme.js";
 
@@ -37,7 +34,7 @@ const accountLine = (label: string, details: string[]) =>
 const resolveAccountEnabled = (
   plugin: ChannelPlugin,
   account: unknown,
-  cfg: ClawdbotConfig,
+  cfg: MoltbotConfig,
 ): boolean => {
   if (plugin.config.isEnabled) {
     return plugin.config.isEnabled(account, cfg);
@@ -50,7 +47,7 @@ const resolveAccountEnabled = (
 const resolveAccountConfigured = async (
   plugin: ChannelPlugin,
   account: unknown,
-  cfg: ClawdbotConfig,
+  cfg: MoltbotConfig,
 ): Promise<boolean> => {
   if (plugin.config.isConfigured) {
     return await plugin.config.isConfigured(account, cfg);
@@ -61,7 +58,7 @@ const resolveAccountConfigured = async (
 const buildAccountSnapshot = (params: {
   plugin: ChannelPlugin;
   account: unknown;
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   accountId: string;
   enabled: boolean;
   configured: boolean;
@@ -79,7 +76,7 @@ const buildAccountSnapshot = (params: {
 
 const formatAllowFrom = (params: {
   plugin: ChannelPlugin;
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   accountId?: string | null;
   allowFrom: Array<string | number>;
 }) => {
@@ -96,7 +93,7 @@ const formatAllowFrom = (params: {
 const buildAccountDetails = (params: {
   entry: ChannelAccountEntry;
   plugin: ChannelPlugin;
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   includeAllowFrom: boolean;
 }): string[] => {
   const details: string[] = [];
@@ -132,7 +129,7 @@ const buildAccountDetails = (params: {
 };
 
 export async function buildChannelSummary(
-  cfg?: ClawdbotConfig,
+  cfg?: MoltbotConfig,
   options?: ChannelSummaryOptions,
 ): Promise<string[]> {
   const effective = cfg ?? loadConfig();
@@ -144,21 +141,14 @@ export async function buildChannelSummary(
   for (const plugin of listChannelPlugins()) {
     const accountIds = plugin.config.listAccountIds(effective);
     const defaultAccountId =
-      plugin.config.defaultAccountId?.(effective) ??
-      accountIds[0] ??
-      DEFAULT_ACCOUNT_ID;
-    const resolvedAccountIds =
-      accountIds.length > 0 ? accountIds : [defaultAccountId];
+      plugin.config.defaultAccountId?.(effective) ?? accountIds[0] ?? DEFAULT_ACCOUNT_ID;
+    const resolvedAccountIds = accountIds.length > 0 ? accountIds : [defaultAccountId];
     const entries: ChannelAccountEntry[] = [];
 
     for (const accountId of resolvedAccountIds) {
       const account = plugin.config.resolveAccount(effective, accountId);
       const enabled = resolveAccountEnabled(plugin, account, effective);
-      const configured = await resolveAccountConfigured(
-        plugin,
-        account,
-        effective,
-      );
+      const configured = await resolveAccountConfigured(plugin, account, effective);
       const snapshot = buildAccountSnapshot({
         plugin,
         account,
@@ -173,24 +163,20 @@ export async function buildChannelSummary(
     const configuredEntries = entries.filter((entry) => entry.configured);
     const anyEnabled = entries.some((entry) => entry.enabled);
     const fallbackEntry =
-      entries.find((entry) => entry.accountId === defaultAccountId) ??
-      entries[0];
+      entries.find((entry) => entry.accountId === defaultAccountId) ?? entries[0];
     const summary = plugin.status?.buildChannelSummary
       ? await plugin.status.buildChannelSummary({
           account: fallbackEntry?.account ?? {},
           cfg: effective,
           defaultAccountId,
           snapshot:
-            fallbackEntry?.snapshot ??
-            ({ accountId: defaultAccountId } as ChannelAccountSnapshot),
+            fallbackEntry?.snapshot ?? ({ accountId: defaultAccountId } as ChannelAccountSnapshot),
         })
       : undefined;
 
     const summaryRecord = summary as Record<string, unknown> | undefined;
     const linked =
-      summaryRecord && typeof summaryRecord.linked === "boolean"
-        ? summaryRecord.linked
-        : null;
+      summaryRecord && typeof summaryRecord.linked === "boolean" ? summaryRecord.linked : null;
     const configured =
       summaryRecord && typeof summaryRecord.configured === "boolean"
         ? summaryRecord.configured
@@ -216,9 +202,7 @@ export async function buildChannelSummary(
     let line = `${baseLabel}: ${status}`;
 
     const authAgeMs =
-      summaryRecord && typeof summaryRecord.authAgeMs === "number"
-        ? summaryRecord.authAgeMs
-        : null;
+      summaryRecord && typeof summaryRecord.authAgeMs === "number" ? summaryRecord.authAgeMs : null;
     const self = summaryRecord?.self as { e164?: string | null } | undefined;
     if (self?.e164) line += ` ${self.e164}`;
     if (authAgeMs != null && authAgeMs >= 0) {

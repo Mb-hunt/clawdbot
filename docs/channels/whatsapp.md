@@ -10,8 +10,8 @@ Status: WhatsApp Web via Baileys only. Gateway owns the session(s).
 
 ## Quick setup (beginner)
 1) Use a **separate phone number** if possible (recommended).
-2) Configure WhatsApp in `~/.clawdbot/clawdbot.json`.
-3) Run `clawdbot channels login` to scan the QR code (Linked Devices).
+2) Configure WhatsApp in `~/.clawdbot/moltbot.json`.
+3) Run `moltbot channels login` to scan the QR code (Linked Devices).
 4) Start the gateway.
 
 Minimal config:
@@ -31,6 +31,16 @@ Minimal config:
 - Deterministic routing: replies return to WhatsApp, no model routing.
 - Model sees enough context to understand quoted replies.
 
+## Config writes
+By default, WhatsApp is allowed to write config updates triggered by `/config set|unset` (requires `commands.config: true`).
+
+Disable with:
+```json5
+{
+  channels: { whatsapp: { configWrites: false } }
+}
+```
+
 ## Architecture (who owns what)
 - **Gateway** owns the Baileys socket and inbox loop.
 - **CLI / macOS app** talk to the gateway; no direct Baileys use.
@@ -38,12 +48,12 @@ Minimal config:
 
 ## Getting a phone number (two modes)
 
-WhatsApp requires a real mobile number for verification. VoIP and virtual numbers are usually blocked. There are two supported ways to run Clawdbot on WhatsApp:
+WhatsApp requires a real mobile number for verification. VoIP and virtual numbers are usually blocked. There are two supported ways to run Moltbot on WhatsApp:
 
 ### Dedicated number (recommended)
-Use a **separate phone number** for Clawdbot. Best UX, clean routing, no self-chat quirks. Ideal setup: **spare/old Android phone + eSIM**. Leave it on Wi‑Fi and power, and link it via QR.
+Use a **separate phone number** for Moltbot. Best UX, clean routing, no self-chat quirks. Ideal setup: **spare/old Android phone + eSIM**. Leave it on Wi‑Fi and power, and link it via QR.
 
-**WhatsApp Business:** You can use WhatsApp Business on the same device with a different number. Great for keeping your personal WhatsApp separate — install WhatsApp Business and register the Clawdbot number there.
+**WhatsApp Business:** You can use WhatsApp Business on the same device with a different number. Great for keeping your personal WhatsApp separate — install WhatsApp Business and register the Moltbot number there.
 
 **Sample config (dedicated number, single-user allowlist):**
 ```json5
@@ -59,10 +69,10 @@ Use a **separate phone number** for Clawdbot. Best UX, clean routing, no self-ch
 
 **Pairing mode (optional):**
 If you want pairing instead of allowlist, set `channels.whatsapp.dmPolicy` to `pairing`. Unknown senders get a pairing code; approve with:
-`clawdbot pairing approve whatsapp <code>`
+`moltbot pairing approve whatsapp <code>`
 
 ### Personal number (fallback)
-Quick fallback: run Clawdbot on **your own number**. Message yourself (WhatsApp “Message yourself”) for testing so you don’t spam contacts. Expect to read verification codes on your main phone during setup and experiments. **Must enable self-chat mode.**
+Quick fallback: run Moltbot on **your own number**. Message yourself (WhatsApp “Message yourself”) for testing so you don’t spam contacts. Expect to read verification codes on your main phone during setup and experiments. **Must enable self-chat mode.**
 When the wizard asks for your personal WhatsApp number, enter the phone you will message from (the owner/sender), not the assistant number.
 
 **Sample config (personal number, self-chat):**
@@ -72,15 +82,13 @@ When the wizard asks for your personal WhatsApp number, enter the phone you will
     "selfChatMode": true,
     "dmPolicy": "allowlist",
     "allowFrom": ["+15551234567"]
-  },
-  "messages": {
-    "responsePrefix": "[clawdbot]"
   }
 }
 ```
 
-Tip: set `messages.responsePrefix` explicitly if you want a consistent bot prefix
-on outbound replies.
+Self-chat replies default to `[{identity.name}]` when set (otherwise `[moltbot]`)
+if `messages.responsePrefix` is unset. Set it explicitly to customize or disable
+the prefix (use `""` to remove it).
 
 ### Number sourcing tips
 - **Local eSIM** from your country's mobile carrier (most reliable)
@@ -93,20 +101,20 @@ on outbound replies.
 **Tip:** The number only needs to receive one verification SMS. After that, WhatsApp Web sessions persist via `creds.json`.
 
 ## Why Not Twilio?
-- Early Clawdbot builds supported Twilio’s WhatsApp Business integration.
+- Early Moltbot builds supported Twilio’s WhatsApp Business integration.
 - WhatsApp Business numbers are a poor fit for a personal assistant.
 - Meta enforces a 24‑hour reply window; if you haven’t responded in the last 24 hours, the business number can’t initiate new messages.
 - High-volume or “chatty” usage triggers aggressive blocking, because business accounts aren’t meant to send dozens of personal assistant messages.
 - Result: unreliable delivery and frequent blocks, so support was removed.
 
 ## Login + credentials
-- Login command: `clawdbot channels login` (QR via Linked Devices).
-- Multi-account login: `clawdbot channels login --account <id>` (`<id>` = `accountId`).
+- Login command: `moltbot channels login` (QR via Linked Devices).
+- Multi-account login: `moltbot channels login --account <id>` (`<id>` = `accountId`).
 - Default account (when `--account` is omitted): `default` if present, otherwise the first configured account id (sorted).
 - Credentials stored in `~/.clawdbot/credentials/whatsapp/<accountId>/creds.json`.
 - Backup copy at `creds.json.bak` (restored on corruption).
 - Legacy compatibility: older installs stored Baileys files directly in `~/.clawdbot/credentials/`.
-- Logout: `clawdbot channels logout` (or `--account <id>`) deletes WhatsApp auth state (but keeps shared `oauth.json`).
+- Logout: `moltbot channels logout` (or `--account <id>`) deletes WhatsApp auth state (but keeps shared `oauth.json`).
 - Logged-out socket => error instructs re-link.
 
 ## Inbound flow (DM + group)
@@ -115,12 +123,12 @@ on outbound replies.
 - Status/broadcast chats are ignored.
 - Direct chats use E.164; groups use group JID.
 - **DM policy**: `channels.whatsapp.dmPolicy` controls direct chat access (default: `pairing`).
-  - Pairing: unknown senders get a pairing code (approve via `clawdbot pairing approve whatsapp <code>`; codes expire after 1 hour).
+  - Pairing: unknown senders get a pairing code (approve via `moltbot pairing approve whatsapp <code>`; codes expire after 1 hour).
   - Open: requires `channels.whatsapp.allowFrom` to include `"*"`.
   - Self messages are always allowed; “self-chat mode” still requires `channels.whatsapp.allowFrom` to include your own number.
 
 ### Personal-number mode (fallback)
-If you run Clawdbot on your **personal WhatsApp number**, enable `channels.whatsapp.selfChatMode` (see sample above).
+If you run Moltbot on your **personal WhatsApp number**, enable `channels.whatsapp.selfChatMode` (see sample above).
 
 Behavior:
 - Outbound DMs never trigger pairing replies (prevents spamming contacts).
@@ -128,18 +136,44 @@ Behavior:
 - Self-chat mode (allowFrom includes your number) avoids auto read receipts and ignores mention JIDs.
 - Read receipts sent for non-self-chat DMs.
 
+## Read receipts
+By default, the gateway marks inbound WhatsApp messages as read (blue ticks) once they are accepted.
+
+Disable globally:
+```json5
+{
+  channels: { whatsapp: { sendReadReceipts: false } }
+}
+```
+
+Disable per account:
+```json5
+{
+  channels: {
+    whatsapp: {
+      accounts: {
+        personal: { sendReadReceipts: false }
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Self-chat mode always skips read receipts.
+
 ## WhatsApp FAQ: sending messages + pairing
 
-**Will Clawdbot message random contacts when I link WhatsApp?**  
-No. Default DM policy is **pairing**, so unknown senders only get a pairing code and their message is **not processed**. Clawdbot only replies to chats it receives, or to sends you explicitly trigger (agent/CLI).
+**Will Moltbot message random contacts when I link WhatsApp?**  
+No. Default DM policy is **pairing**, so unknown senders only get a pairing code and their message is **not processed**. Moltbot only replies to chats it receives, or to sends you explicitly trigger (agent/CLI).
 
 **How does pairing work on WhatsApp?**  
 Pairing is a DM gate for unknown senders:
 - First DM from a new sender returns a short code (message is not processed).
-- Approve with: `clawdbot pairing approve whatsapp <code>` (list with `clawdbot pairing list whatsapp`).
+- Approve with: `moltbot pairing approve whatsapp <code>` (list with `moltbot pairing list whatsapp`).
 - Codes expire after 1 hour; pending requests are capped at 3 per channel.
 
-**Can multiple people use different Clawdbots on one WhatsApp number?**  
+**Can multiple people use different Moltbots on one WhatsApp number?**  
 Yes, by routing each sender to a different agent via `bindings` (peer `kind: "dm"`, sender E.164 like `+15551234567`). Replies still come from the **same WhatsApp account**, and direct chats collapse to each agent’s main session, so use **one agent per person**. DM access control (`dmPolicy`/`allowFrom`) is global per WhatsApp account. See [Multi-Agent Routing](/concepts/multi-agent).
 
 **Why do you ask for my phone number in the wizard?**  
@@ -168,9 +202,9 @@ The wizard uses it to set your **allowlist/owner** so your own DMs are permitted
   - `always`: always triggers.
 - `/activation mention|always` is owner-only and must be sent as a standalone message.
 - Owner = `channels.whatsapp.allowFrom` (or self E.164 if unset).
-- **History injection**:
-  - Recent messages (default 50) inserted under:
-    `[Chat messages since your last reply - for context]`
+- **History injection** (pending-only):
+  - Recent *unprocessed* messages (default 50) inserted under:
+    `[Chat messages since your last reply - for context]` (messages already in the session are not re-injected)
   - Current message under:
     `[Current message - respond to this]`
   - Sender suffix appended: `[from: Name (+E164)]`
@@ -237,20 +271,26 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 
 ## Limits
 - Outbound text is chunked to `channels.whatsapp.textChunkLimit` (default 4000).
+- Optional newline chunking: set `channels.whatsapp.chunkMode="newline"` to split on blank lines (paragraph boundaries) before length chunking.
 - Inbound media saves are capped by `channels.whatsapp.mediaMaxMb` (default 50 MB).
 - Outbound media items are capped by `agents.defaults.mediaMaxMb` (default 5 MB).
 
 ## Outbound send (text + media)
 - Uses active web listener; error if gateway not running.
-- Text chunking: 4k max per message (configurable via `channels.whatsapp.textChunkLimit`).
+- Text chunking: 4k max per message (configurable via `channels.whatsapp.textChunkLimit`, optional `channels.whatsapp.chunkMode`).
 - Media:
   - Image/video/audio/document supported.
   - Audio sent as PTT; `audio/ogg` => `audio/ogg; codecs=opus`.
   - Caption only on first media item.
   - Media fetch supports HTTP(S) and local paths.
   - Animated GIFs: WhatsApp expects MP4 with `gifPlayback: true` for inline looping.
-    - CLI: `clawdbot message send --media <mp4> --gif-playback`
+    - CLI: `moltbot message send --media <mp4> --gif-playback`
     - Gateway: `send` params include `gifPlayback: true`
+
+## Voice notes (PTT audio)
+WhatsApp sends audio as **voice notes** (PTT bubble).
+- Best results: OGG/Opus. Moltbot rewrites `audio/ogg` to `audio/ogg; codecs=opus`.
+- `[[audio_as_voice]]` is ignored for WhatsApp (audio already ships as voice note).
 
 ## Media limits + optimization
 - Default outbound cap: 5 MB (per media item).
@@ -260,8 +300,9 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 
 ## Heartbeats
 - **Gateway heartbeat** logs connection health (`web.heartbeatSeconds`, default 60s).
-- **Agent heartbeat** is global (`agents.defaults.heartbeat.*`) and runs in the main session.
-  - Uses the configured heartbeat prompt (default: `Read HEARTBEAT.md if exists. Consider outstanding tasks. Checkup sometimes on your human during (user local) day time.`) + `HEARTBEAT_OK` skip behavior.
+- **Agent heartbeat** can be configured per agent (`agents.list[].heartbeat`) or globally
+  via `agents.defaults.heartbeat` (fallback when no per-agent entries are set).
+  - Uses the configured heartbeat prompt (default: `Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`) + `HEARTBEAT_OK` skip behavior.
   - Delivery defaults to the last used channel (or configured target).
 
 ## Reconnect behavior
@@ -273,7 +314,7 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 ## Config quick map
 - `channels.whatsapp.dmPolicy` (DM policy: pairing/allowlist/open/disabled).
 - `channels.whatsapp.selfChatMode` (same-phone setup; bot uses your personal WhatsApp number).
-- `channels.whatsapp.allowFrom` (DM allowlist).
+- `channels.whatsapp.allowFrom` (DM allowlist). WhatsApp uses E.164 phone numbers (no usernames).
 - `channels.whatsapp.mediaMaxMb` (inbound media save cap).
 - `channels.whatsapp.ackReaction` (auto-reaction on message receipt: `{emoji, direct, group}`).
 - `channels.whatsapp.accounts.<accountId>.*` (per-account settings + optional `authDir`).
@@ -282,6 +323,7 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 - `channels.whatsapp.groupAllowFrom` (group sender allowlist).
 - `channels.whatsapp.groupPolicy` (group policy).
 - `channels.whatsapp.historyLimit` / `channels.whatsapp.accounts.<accountId>.historyLimit` (group history context; `0` disables).
+- `channels.whatsapp.dmHistoryLimit` (DM history limit in user turns). Per-user overrides: `channels.whatsapp.dms["<phone>"].historyLimit`.
 - `channels.whatsapp.groups` (group allowlist + mention gating defaults; use `"*"` to allow all)
 - `channels.whatsapp.actions.reactions` (gate WhatsApp tool reactions).
 - `agents.list[].groupChat.mentionPatterns` (or `messages.groupChat.mentionPatterns`)
@@ -293,6 +335,8 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 - `agents.defaults.heartbeat.model` (optional override)
 - `agents.defaults.heartbeat.target`
 - `agents.defaults.heartbeat.to`
+- `agents.defaults.heartbeat.session`
+- `agents.list[].heartbeat.*` (per-agent overrides)
 - `session.*` (scope, idle, store, mainKey)
 - `web.enabled` (disable channel startup when false)
 - `web.heartbeatSeconds`
@@ -300,18 +344,18 @@ WhatsApp can automatically send emoji reactions to incoming messages immediately
 
 ## Logs + troubleshooting
 - Subsystems: `whatsapp/inbound`, `whatsapp/outbound`, `web-heartbeat`, `web-reconnect`.
-- Log file: `/tmp/clawdbot/clawdbot-YYYY-MM-DD.log` (configurable).
+- Log file: `/tmp/moltbot/moltbot-YYYY-MM-DD.log` (configurable).
 - Troubleshooting guide: [Gateway troubleshooting](/gateway/troubleshooting).
 
 ## Troubleshooting (quick)
 
 **Not linked / QR login required**
 - Symptom: `channels status` shows `linked: false` or warns “Not linked”.
-- Fix: run `clawdbot channels login` on the gateway host and scan the QR (WhatsApp → Settings → Linked Devices).
+- Fix: run `moltbot channels login` on the gateway host and scan the QR (WhatsApp → Settings → Linked Devices).
 
 **Linked but disconnected / reconnect loop**
 - Symptom: `channels status` shows `running, disconnected` or warns “Linked but disconnected”.
-- Fix: `clawdbot doctor` (or restart the gateway). If it persists, relink via `channels login` and inspect `clawdbot logs --follow`.
+- Fix: `moltbot doctor` (or restart the gateway). If it persists, relink via `channels login` and inspect `moltbot logs --follow`.
 
 **Bun runtime**
 - Bun is **not recommended**. WhatsApp (Baileys) and Telegram are unreliable on Bun.

@@ -1,31 +1,30 @@
 import os from "node:os";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const createService = vi.fn();
-const shutdown = vi.fn();
-const registerUnhandledRejectionHandler = vi.fn();
+import * as logging from "../logging.js";
 
-const logWarn = vi.fn();
-const logDebug = vi.fn();
-const getLoggerInfo = vi.fn();
+const mocks = vi.hoisted(() => ({
+  createService: vi.fn(),
+  shutdown: vi.fn(),
+  registerUnhandledRejectionHandler: vi.fn(),
+  logWarn: vi.fn(),
+  logDebug: vi.fn(),
+}));
+const { createService, shutdown, registerUnhandledRejectionHandler, logWarn, logDebug } = mocks;
 
 const asString = (value: unknown, fallback: string) =>
   typeof value === "string" && value.trim() ? value : fallback;
 
-vi.mock("../logger.js", () => {
+vi.mock("../logger.js", async () => {
+  const actual = await vi.importActual<typeof import("../logger.js")>("../logger.js");
   return {
+    ...actual,
     logWarn: (message: string) => logWarn(message),
     logDebug: (message: string) => logDebug(message),
     logInfo: vi.fn(),
     logError: vi.fn(),
     logSuccess: vi.fn(),
-  };
-});
-
-vi.mock("../logging.js", () => {
-  return {
-    getLogger: () => ({ info: (...args: unknown[]) => getLoggerInfo(...args) }),
   };
 });
 
@@ -41,9 +40,8 @@ vi.mock("@homebridge/ciao", () => {
 
 vi.mock("./unhandled-rejections.js", () => {
   return {
-    registerUnhandledRejectionHandler: (
-      handler: (reason: unknown) => boolean,
-    ) => registerUnhandledRejectionHandler(handler),
+    registerUnhandledRejectionHandler: (handler: (reason: unknown) => boolean) =>
+      registerUnhandledRejectionHandler(handler),
   };
 });
 
@@ -59,6 +57,12 @@ describe("gateway bonjour advertiser", () => {
 
   const prevEnv = { ...process.env };
 
+  beforeEach(() => {
+    vi.spyOn(logging, "getLogger").mockReturnValue({
+      info: (...args: unknown[]) => getLoggerInfo(...args),
+    });
+  });
+
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (!(key in prevEnv)) delete process.env[key];
@@ -72,7 +76,6 @@ describe("gateway bonjour advertiser", () => {
     registerUnhandledRejectionHandler.mockReset();
     logWarn.mockReset();
     logDebug.mockReset();
-    getLoggerInfo.mockReset();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -98,8 +101,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "announced",
         on: vi.fn(),
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -108,34 +110,25 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
       tailnetDns: "host.tailnet.ts.net",
-      cliPath: "/opt/homebrew/bin/clawdbot",
+      cliPath: "/opt/homebrew/bin/moltbot",
     });
 
     expect(createService).toHaveBeenCalledTimes(1);
-    const [bridgeCall] = createService.mock.calls as Array<
-      [Record<string, unknown>]
-    >;
-    expect(bridgeCall?.[0]?.type).toBe("clawdbot-bridge");
-    expect(bridgeCall?.[0]?.port).toBe(18790);
-    expect(bridgeCall?.[0]?.domain).toBe("local");
-    expect(bridgeCall?.[0]?.hostname).toBe("test-host");
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.lanHost).toBe(
-      "test-host.local",
+    const [gatewayCall] = createService.mock.calls as Array<[Record<string, unknown>]>;
+    expect(gatewayCall?.[0]?.type).toBe("moltbot-gw");
+    const gatewayType = asString(gatewayCall?.[0]?.type, "");
+    expect(gatewayType.length).toBeLessThanOrEqual(15);
+    expect(gatewayCall?.[0]?.port).toBe(18789);
+    expect(gatewayCall?.[0]?.domain).toBe("local");
+    expect(gatewayCall?.[0]?.hostname).toBe("test-host");
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.lanHost).toBe("test-host.local");
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.gatewayPort).toBe("18789");
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.sshPort).toBe("2222");
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.cliPath).toBe(
+      "/opt/homebrew/bin/moltbot",
     );
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.bridgePort).toBe(
-      "18790",
-    );
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.sshPort).toBe(
-      "2222",
-    );
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.cliPath).toBe(
-      "/opt/homebrew/bin/clawdbot",
-    );
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.transport).toBe(
-      "bridge",
-    );
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.transport).toBe("gateway");
 
     // We don't await `advertise()`, but it should still be called for each service.
     expect(advertise).toHaveBeenCalledTimes(1);
@@ -143,6 +136,42 @@ describe("gateway bonjour advertiser", () => {
     await started.stop();
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits cliPath and sshPort in minimal mode", async () => {
+    // Allow advertiser to run in unit tests.
+    delete process.env.VITEST;
+    process.env.NODE_ENV = "development";
+
+    vi.spyOn(os, "hostname").mockReturnValue("test-host");
+
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    const advertise = vi.fn().mockResolvedValue(undefined);
+
+    createService.mockImplementation((options: Record<string, unknown>) => {
+      return {
+        advertise,
+        destroy,
+        serviceState: "announced",
+        on: vi.fn(),
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getHostname: () => asString(options.hostname, "unknown"),
+        getPort: () => Number(options.port ?? -1),
+      };
+    });
+
+    const started = await startGatewayBonjourAdvertiser({
+      gatewayPort: 18789,
+      sshPort: 2222,
+      cliPath: "/opt/homebrew/bin/moltbot",
+      minimal: true,
+    });
+
+    const [gatewayCall] = createService.mock.calls as Array<[Record<string, unknown>]>;
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.sshPort).toBeUndefined();
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.cliPath).toBeUndefined();
+
+    await started.stop();
   });
 
   it("attaches conflict listeners for services", async () => {
@@ -165,8 +194,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "announced",
         on,
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -175,14 +203,10 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
     });
 
     // 1 service × 2 listeners
-    expect(onCalls.map((c) => c.event)).toEqual([
-      "name-change",
-      "hostname-change",
-    ]);
+    expect(onCalls.map((c) => c.event)).toEqual(["name-change", "hostname-change"]);
 
     await started.stop();
   });
@@ -207,8 +231,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "announced",
         on: vi.fn(),
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -222,7 +245,6 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
     });
 
     await started.stop();
@@ -252,8 +274,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "unannounced",
         on: vi.fn(),
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -262,7 +283,6 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
     });
 
     // initial advertise attempt happens immediately
@@ -270,9 +290,7 @@ describe("gateway bonjour advertiser", () => {
 
     // allow promise rejection handler to run
     await Promise.resolve();
-    expect(logWarn).toHaveBeenCalledWith(
-      expect.stringContaining("advertise failed"),
-    );
+    expect(logWarn).toHaveBeenCalledWith(expect.stringContaining("advertise failed"));
 
     // watchdog should attempt re-advertise at the 60s interval tick
     await vi.advanceTimersByTimeAsync(60_000);
@@ -302,8 +320,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "unannounced",
         on: vi.fn(),
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -312,13 +329,10 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
     });
 
     expect(advertise).toHaveBeenCalledTimes(1);
-    expect(logWarn).toHaveBeenCalledWith(
-      expect.stringContaining("advertise threw"),
-    );
+    expect(logWarn).toHaveBeenCalledWith(expect.stringContaining("advertise threw"));
 
     await started.stop();
   });
@@ -338,8 +352,7 @@ describe("gateway bonjour advertiser", () => {
         destroy,
         serviceState: "announced",
         on: vi.fn(),
-        getFQDN: () =>
-          `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
+        getFQDN: () => `${asString(options.type, "service")}.${asString(options.domain, "local")}.`,
         getHostname: () => asString(options.hostname, "unknown"),
         getPort: () => Number(options.port ?? -1),
       };
@@ -348,16 +361,13 @@ describe("gateway bonjour advertiser", () => {
     const started = await startGatewayBonjourAdvertiser({
       gatewayPort: 18789,
       sshPort: 2222,
-      bridgePort: 18790,
     });
 
-    const [bridgeCall] = createService.mock.calls as Array<[ServiceCall]>;
-    expect(bridgeCall?.[0]?.name).toBe("Mac (Clawdbot)");
-    expect(bridgeCall?.[0]?.domain).toBe("local");
-    expect(bridgeCall?.[0]?.hostname).toBe("Mac");
-    expect((bridgeCall?.[0]?.txt as Record<string, string>)?.lanHost).toBe(
-      "Mac.local",
-    );
+    const [gatewayCall] = createService.mock.calls as Array<[ServiceCall]>;
+    expect(gatewayCall?.[0]?.name).toBe("Mac (Moltbot)");
+    expect(gatewayCall?.[0]?.domain).toBe("local");
+    expect(gatewayCall?.[0]?.hostname).toBe("Mac");
+    expect((gatewayCall?.[0]?.txt as Record<string, string>)?.lanHost).toBe("Mac.local");
 
     await started.stop();
   });

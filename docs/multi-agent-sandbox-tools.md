@@ -18,8 +18,20 @@ This allows you to run multiple agents with different security profiles:
 - Family/work agents with restricted tools
 - Public-facing agents in sandboxes
 
+`setupCommand` belongs under `sandbox.docker` (global or per-agent) and runs once
+when the container is created.
+
+Auth is per-agent: each agent reads from its own `agentDir` auth store at:
+
+```
+~/.clawdbot/agents/<agentId>/agent/auth-profiles.json
+```
+
+Credentials are **not** shared between agents. Never reuse `agentDir` across agents.
+If you want to share creds, copy `auth-profiles.json` into the other agent's `agentDir`.
+
 For how sandboxing behaves at runtime, see [Sandboxing](/gateway/sandboxing).
-For debugging “why is this blocked?”, see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) and `clawdbot sandbox explain`.
+For debugging “why is this blocked?”, see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) and `moltbot sandbox explain`.
 
 ---
 
@@ -188,14 +200,18 @@ agents.list[].sandbox.prune.* > agents.defaults.sandbox.prune.*
 ### Tool Restrictions
 The filtering order is:
 1. **Tool profile** (`tools.profile` or `agents.list[].tools.profile`)
-2. **Global tool policy** (`tools.allow` / `tools.deny`)
-3. **Agent-specific tool policy** (`agents.list[].tools`)
-4. **Sandbox tool policy** (`tools.sandbox.tools` or `agents.list[].tools.sandbox.tools`)
-5. **Subagent tool policy** (`tools.subagents.tools`, if applicable)
+2. **Provider tool profile** (`tools.byProvider[provider].profile` or `agents.list[].tools.byProvider[provider].profile`)
+3. **Global tool policy** (`tools.allow` / `tools.deny`)
+4. **Provider tool policy** (`tools.byProvider[provider].allow/deny`)
+5. **Agent-specific tool policy** (`agents.list[].tools.allow/deny`)
+6. **Agent provider policy** (`agents.list[].tools.byProvider[provider].allow/deny`)
+7. **Sandbox tool policy** (`tools.sandbox.tools` or `agents.list[].tools.sandbox.tools`)
+8. **Subagent tool policy** (`tools.subagents.tools`, if applicable)
 
 Each level can further restrict tools, but cannot grant back denied tools from earlier levels.
 If `agents.list[].tools.sandbox.tools` is set, it replaces `tools.sandbox.tools` for that agent.
 If `agents.list[].tools.profile` is set, it overrides `tools.profile` for that agent.
+Provider tool keys accept either `provider` (e.g. `google-antigravity`) or `provider/model` (e.g. `openai/gpt-5.2`).
 
 ### Tool groups (shorthands)
 
@@ -209,7 +225,7 @@ Tool policies (global, agent, sandbox) support `group:*` entries that expand to 
 - `group:automation`: `cron`, `gateway`
 - `group:messaging`: `message`
 - `group:nodes`: `nodes`
-- `group:clawdbot`: all built-in Clawdbot tools (excludes provider plugins)
+- `group:moltbot`: all built-in Moltbot tools (excludes provider plugins)
 
 ### Elevated Mode
 `tools.elevated` is the global baseline (sender-based allowlist). `agents.list[].tools.elevated` can further restrict elevated for specific agents (both must allow).
@@ -262,7 +278,7 @@ Mitigation patterns:
 }
 ```
 
-Legacy `agent.*` configs are migrated by `clawdbot doctor`; prefer `agents.defaults` + `agents.list` going forward.
+Legacy `agent.*` configs are migrated by `moltbot doctor`; prefer `agents.defaults` + `agents.list` going forward.
 
 ---
 
@@ -315,12 +331,12 @@ After configuring multi-agent sandbox and tools:
 
 1. **Check agent resolution:**
    ```exec
-   clawdbot agents list --bindings
+   moltbot agents list --bindings
    ```
 
 2. **Verify sandbox containers:**
    ```exec
-   docker ps --filter "label=clawdbot.sandbox=1"
+   docker ps --filter "label=moltbot.sandbox=1"
    ```
 
 3. **Test tool restrictions:**

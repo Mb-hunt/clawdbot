@@ -1,5 +1,5 @@
 ---
-summary: "Clawdbot CLI reference for `clawdbot` commands, subcommands, and options"
+summary: "Moltbot CLI reference for `moltbot` commands, subcommands, and options"
 read_when:
   - Adding or modifying CLI commands or options
   - Documenting new command surfaces
@@ -9,12 +9,54 @@ read_when:
 
 This page describes the current CLI behavior. If commands change, update this doc.
 
+## Command pages
+
+- [`setup`](/cli/setup)
+- [`onboard`](/cli/onboard)
+- [`configure`](/cli/configure)
+- [`config`](/cli/config)
+- [`doctor`](/cli/doctor)
+- [`dashboard`](/cli/dashboard)
+- [`reset`](/cli/reset)
+- [`uninstall`](/cli/uninstall)
+- [`update`](/cli/update)
+- [`message`](/cli/message)
+- [`agent`](/cli/agent)
+- [`agents`](/cli/agents)
+- [`acp`](/cli/acp)
+- [`status`](/cli/status)
+- [`health`](/cli/health)
+- [`sessions`](/cli/sessions)
+- [`gateway`](/cli/gateway)
+- [`logs`](/cli/logs)
+- [`system`](/cli/system)
+- [`models`](/cli/models)
+- [`memory`](/cli/memory)
+- [`nodes`](/cli/nodes)
+- [`devices`](/cli/devices)
+- [`node`](/cli/node)
+- [`approvals`](/cli/approvals)
+- [`sandbox`](/cli/sandbox)
+- [`tui`](/cli/tui)
+- [`browser`](/cli/browser)
+- [`cron`](/cli/cron)
+- [`dns`](/cli/dns)
+- [`docs`](/cli/docs)
+- [`hooks`](/cli/hooks)
+- [`webhooks`](/cli/webhooks)
+- [`pairing`](/cli/pairing)
+- [`plugins`](/cli/plugins) (plugin commands)
+- [`channels`](/cli/channels)
+- [`security`](/cli/security)
+- [`skills`](/cli/skills)
+- [`voicecall`](/cli/voicecall) (plugin; if installed)
+
 ## Global flags
 
 - `--dev`: isolate state under `~/.clawdbot-dev` and shift default ports.
 - `--profile <name>`: isolate state under `~/.clawdbot-<name>`.
 - `--no-color`: disable ANSI colors.
-- `--update`: shorthand for `clawdbot update` (source installs only).
+- `--update`: shorthand for `moltbot update` (source installs only).
 - `-V`, `--version`, `-v`: print version and exit.
 
 ## Output styling
@@ -27,7 +69,7 @@ This page describes the current CLI behavior. If commands change, update this do
 
 ## Color palette
 
-Clawdbot uses a lobster palette for CLI output.
+Moltbot uses a lobster palette for CLI output.
 
 - `accent` (#FF5A2D): headings, labels, primary highlights.
 - `accentBright` (#FF7A3D): command names, emphasis.
@@ -43,11 +85,17 @@ Palette source of truth: `src/terminal/palette.ts` (aka “lobster seam”).
 ## Command tree
 
 ```
-clawdbot [--dev] [--profile <name>] <command>
+moltbot [--dev] [--profile <name>] <command>
   setup
   onboard
-  configure (alias: config)
+  configure
+  config
+    get
+    set
+    unset
   doctor
+  security
+    audit
   reset
   uninstall
   update
@@ -80,6 +128,7 @@ clawdbot [--dev] [--profile <name>] <command>
     list
     add
     delete
+  acp
   status
   health
   sessions
@@ -87,15 +136,19 @@ clawdbot [--dev] [--profile <name>] <command>
     call
     health
     status
+    probe
     discover
-  daemon
-    status
     install
     uninstall
     start
     stop
     restart
+    run
   logs
+  system
+    event
+    heartbeat last|enable|disable
+    presence
   models
     list
     status
@@ -111,7 +164,6 @@ clawdbot [--dev] [--profile <name>] <command>
     list
     recreate
     explain
-  wake
   cron
     status
     list
@@ -123,21 +175,19 @@ clawdbot [--dev] [--profile <name>] <command>
     runs
     run
   nodes
-    status
-    describe
-    list
-    pending
-    approve
-    reject
-    rename
-    invoke
+  devices
+  node
     run
-    notify
-    camera list|snap|clip
-    canvas snapshot|present|hide|navigate|eval
-    canvas a2ui push|reset
-    screen record
-    location get
+    status
+    install
+    uninstall
+    start
+    stop
+    restart
+  approvals
+    get
+    set
+    allowlist add|remove
   browser
     status
     start
@@ -168,6 +218,14 @@ clawdbot [--dev] [--profile <name>] <command>
     console
     pdf
   hooks
+    list
+    info
+    check
+    enable
+    disable
+    install
+    update
+  webhooks
     gmail setup|run
   pairing
     list
@@ -178,17 +236,23 @@ clawdbot [--dev] [--profile <name>] <command>
   tui
 ```
 
-Note: plugins can add additional top-level commands (for example `clawdbot voicecall`).
+Note: plugins can add additional top-level commands (for example `moltbot voicecall`).
+
+## Security
+
+- `moltbot security audit` — audit config + local state for common security foot-guns.
+- `moltbot security audit --deep` — best-effort live Gateway probe.
+- `moltbot security audit --fix` — tighten safe defaults and chmod state/config.
 
 ## Plugins
 
 Manage extensions and their config:
 
-- `clawdbot plugins list` — discover plugins (use `--json` for machine output).
-- `clawdbot plugins info <id>` — show details for a plugin.
-- `clawdbot plugins install <path|.tgz|npm-spec>` — install a plugin (or add a plugin path to `plugins.load.paths`).
-- `clawdbot plugins enable <id>` / `disable <id>` — toggle `plugins.entries.<id>.enabled`.
-- `clawdbot plugins doctor` — report plugin load errors.
+- `moltbot plugins list` — discover plugins (use `--json` for machine output).
+- `moltbot plugins info <id>` — show details for a plugin.
+- `moltbot plugins install <path|.tgz|npm-spec>` — install a plugin (or add a plugin path to `plugins.load.paths`).
+- `moltbot plugins enable <id>` / `disable <id>` — toggle `plugins.entries.<id>.enabled`.
+- `moltbot plugins doctor` — report plugin load errors.
 
 Most plugin changes require a gateway restart. See [/plugin](/plugin).
 
@@ -196,9 +260,9 @@ Most plugin changes require a gateway restart. See [/plugin](/plugin).
 
 Vector search over `MEMORY.md` + `memory/*.md`:
 
-- `clawdbot memory status` — show index stats.
-- `clawdbot memory index` — reindex memory files.
-- `clawdbot memory search "<query>"` — semantic search over memory.
+- `moltbot memory status` — show index stats.
+- `moltbot memory index` — reindex memory files.
+- `moltbot memory search "<query>"` — semantic search over memory.
 
 ## Chat slash commands
 
@@ -232,8 +296,8 @@ Options:
 - `--reset` (reset config + credentials + sessions + workspace before wizard)
 - `--non-interactive`
 - `--mode <local|remote>`
-- `--flow <quickstart|advanced>`
-- `--auth-choice <setup-token|claude-cli|token|openai-codex|openai-api-key|openrouter-api-key|moonshot-api-key|codex-cli|antigravity|gemini-api-key|zai-api-key|apiKey|minimax-api|opencode-zen|skip>`
+- `--flow <quickstart|advanced|manual>` (manual is an alias for advanced)
+- `--auth-choice <setup-token|token|chutes|openai-codex|openai-api-key|openrouter-api-key|ai-gateway-api-key|moonshot-api-key|kimi-code-api-key|synthetic-api-key|venice-api-key|gemini-api-key|zai-api-key|apiKey|minimax-api|minimax-api-lightning|opencode-zen|skip>`
 - `--token-provider <id>` (non-interactive; used with `--auth-choice token`)
 - `--token <token>` (non-interactive; used with `--auth-choice token`)
 - `--token-profile-id <id>` (non-interactive; default: `<provider>:manual`)
@@ -241,14 +305,16 @@ Options:
 - `--anthropic-api-key <key>`
 - `--openai-api-key <key>`
 - `--openrouter-api-key <key>`
+- `--ai-gateway-api-key <key>`
 - `--moonshot-api-key <key>`
+- `--kimi-code-api-key <key>`
 - `--gemini-api-key <key>`
 - `--zai-api-key <key>`
 - `--minimax-api-key <key>`
 - `--opencode-zen-api-key <key>`
 - `--gateway-port <port>`
-- `--gateway-bind <loopback|lan|tailnet|auto>`
-- `--gateway-auth <off|token|password>`
+- `--gateway-bind <loopback|lan|tailnet|auto|custom>`
+- `--gateway-auth <token|password>`
 - `--gateway-token <token>`
 - `--gateway-password <password>`
 - `--remote-url <url>`
@@ -265,8 +331,17 @@ Options:
 - `--node-manager <npm|pnpm|bun>` (pnpm recommended; bun not recommended for Gateway runtime)
 - `--json`
 
-### `configure` / `config`
+### `configure`
 Interactive configuration wizard (models, channels, skills, gateway).
+
+### `config`
+Non-interactive config helpers (get/set/unset). Running `moltbot config` with no
+subcommand launches the wizard.
+
+Subcommands:
+- `config get <path>`: print a config value (dot/bracket path).
+- `config set <path> <value>`: set a value (JSON5 or raw string).
+- `config unset <path>`: remove a value.
 
 ### `doctor`
 Health checks + quick fixes (config + gateway + legacy services).
@@ -280,12 +355,12 @@ Options:
 ## Channel helpers
 
 ### `channels`
-Manage chat channel accounts (WhatsApp/Telegram/Discord/Slack/Signal/iMessage/MS Teams).
+Manage chat channel accounts (WhatsApp/Telegram/Discord/Google Chat/Slack/Mattermost (plugin)/Signal/iMessage/MS Teams).
 
 Subcommands:
-- `channels list`: show configured channels and auth profiles (Claude Code + Codex CLI OAuth sync included).
-- `channels status`: check gateway reachability and channel health (`--probe` runs extra checks; use `clawdbot health` or `clawdbot status --deep` for gateway health probes).
-- Tip: `channels status` prints warnings with suggested fixes when it can detect common misconfigurations (then points you to `clawdbot doctor`).
+- `channels list`: show configured channels and auth profiles.
+- `channels status`: check gateway reachability and channel health (`--probe` runs extra checks; use `moltbot health` or `moltbot status --deep` for gateway health probes).
+- Tip: `channels status` prints warnings with suggested fixes when it can detect common misconfigurations (then points you to `moltbot doctor`).
 - `channels logs`: show recent channel logs from the gateway log file.
 - `channels add`: wizard-style setup when no flags are passed; flags switch to non-interactive mode.
 - `channels remove`: disable by default; pass `--delete` to remove config entries without prompts.
@@ -293,7 +368,7 @@ Subcommands:
 - `channels logout`: log out of a channel session (if supported).
 
 Common options:
-- `--channel <name>`: `whatsapp|telegram|discord|slack|signal|imessage|msteams`
+- `--channel <name>`: `whatsapp|telegram|discord|googlechat|slack|mattermost|signal|imessage|msteams`
 - `--account <id>`: channel account id (default `default`)
 - `--name <label>`: display name for the account
 
@@ -315,21 +390,15 @@ Common options:
 - `--lines <n>` (default `200`)
 - `--json`
 
-OAuth sync sources:
-- Claude Code → `anthropic:claude-cli`
-  - macOS: Keychain item "Claude Code-credentials" (choose "Always Allow" to avoid launchd prompts)
-  - Linux/Windows: `~/.claude/.credentials.json`
-- `~/.codex/auth.json` → `openai-codex:codex-cli`
-
 More detail: [/concepts/oauth](/concepts/oauth)
 
 Examples:
 ```bash
-clawdbot channels add --channel telegram --account alerts --name "Alerts Bot" --token $TELEGRAM_BOT_TOKEN
-clawdbot channels add --channel discord --account work --name "Work Bot" --token $DISCORD_BOT_TOKEN
-clawdbot channels remove --channel discord --account work --delete
-clawdbot channels status --probe
-clawdbot status --deep
+moltbot channels add --channel telegram --account alerts --name "Alerts Bot" --token $TELEGRAM_BOT_TOKEN
+moltbot channels add --channel discord --account work --name "Work Bot" --token $DISCORD_BOT_TOKEN
+moltbot channels remove --channel discord --account work --delete
+moltbot channels status --probe
+moltbot status --deep
 ```
 
 ### `skills`
@@ -354,12 +423,12 @@ Subcommands:
 - `pairing list <channel> [--json]`
 - `pairing approve <channel> <code> [--notify]`
 
-### `hooks gmail`
+### `webhooks gmail`
 Gmail Pub/Sub hook setup + runner. See [/automation/gmail-pubsub](/automation/gmail-pubsub).
 
 Subcommands:
-- `hooks gmail setup` (requires `--account <email>`; supports `--project`, `--topic`, `--subscription`, `--label`, `--hook-url`, `--hook-token`, `--push-token`, `--bind`, `--port`, `--path`, `--include-body`, `--max-bytes`, `--renew-minutes`, `--tailscale`, `--tailscale-path`, `--tailscale-target`, `--push-endpoint`, `--json`)
-- `hooks gmail run` (runtime overrides for the same flags)
+- `webhooks gmail setup` (requires `--account <email>`; supports `--project`, `--topic`, `--subscription`, `--label`, `--hook-url`, `--hook-token`, `--push-token`, `--bind`, `--port`, `--path`, `--include-body`, `--max-bytes`, `--renew-minutes`, `--tailscale`, `--tailscale-path`, `--tailscale-target`, `--push-endpoint`, `--json`)
+- `webhooks gmail run` (runtime overrides for the same flags)
 
 ### `dns setup`
 Wide-area discovery DNS helper (CoreDNS + Tailscale). See [/gateway/discovery](/gateway/discovery).
@@ -386,8 +455,8 @@ Subcommands:
 - `message event <list|create>`
 
 Examples:
-- `clawdbot message send --to +15555550123 --message "Hi"`
-- `clawdbot message poll --channel discord --to channel:123 --poll-question "Snack?" --poll-option Pizza --poll-option Sushi`
+- `moltbot message send --target +15555550123 --message "Hi"`
+- `moltbot message poll --channel discord --target channel:123 --poll-question "Snack?" --poll-option Pizza --poll-option Sushi`
 
 ### `agent`
 Run one agent turn via the Gateway (or `--local` embedded).
@@ -399,8 +468,8 @@ Options:
 - `--to <dest>` (for session key and optional delivery)
 - `--session-id <id>`
 - `--thinking <off|minimal|low|medium|high|xhigh>` (GPT-5.2 + Codex models only)
-- `--verbose <on|off>`
-- `--channel <whatsapp|telegram|discord|slack|signal|imessage>`
+- `--verbose <on|full|off>`
+- `--channel <whatsapp|telegram|discord|slack|mattermost|signal|imessage|msteams>`
 - `--local`
 - `--deliver`
 - `--json`
@@ -436,6 +505,11 @@ Options:
 - `--force`
 - `--json`
 
+### `acp`
+Run the ACP bridge that connects IDEs to the Gateway.
+
+See [`acp`](/cli/acp) for full options and examples.
+
 ### `status`
 Show linked session health and recent recipients.
 
@@ -448,17 +522,20 @@ Options:
 - `--verbose`
 - `--debug` (alias for `--verbose`)
 
+Notes:
+- Overview includes Gateway + node host service status when available.
+
 ### Usage tracking
-Clawdbot can surface provider usage/quota when OAuth/API creds are available.
+Moltbot can surface provider usage/quota when OAuth/API creds are available.
 
 Surfaces:
-- `/status` (alias: `/usage`; adds a short usage line when available)
-- `clawdbot status --usage` (prints full provider breakdown)
+- `/status` (adds a short provider usage line when available)
+- `moltbot status --usage` (prints full provider breakdown)
 - macOS menu bar (Usage section under Context)
 
 Notes:
 - Data comes directly from provider usage endpoints (no estimates).
-- Providers: Anthropic, GitHub Copilot, Gemini CLI, Antigravity, OpenAI Codex OAuth, plus z.ai when an API key is configured.
+- Providers: Anthropic, GitHub Copilot, OpenAI Codex OAuth, plus Gemini CLI/Antigravity when those provider plugins are enabled.
 - If no matching credentials exist, usage is hidden.
 - Details: see [Usage tracking](/concepts/usage-tracking).
 
@@ -516,7 +593,7 @@ Run the WebSocket Gateway.
 
 Options:
 - `--port <port>`
-- `--bind <loopback|tailnet|lan|auto>`
+- `--bind <loopback|tailnet|lan|auto|custom>`
 - `--token <token>`
 - `--auth <token|password>`
 - `--password <password>`
@@ -533,24 +610,25 @@ Options:
 - `--raw-stream`
 - `--raw-stream-path <path>`
 
-### `daemon`
+### `gateway service`
 Manage the Gateway service (launchd/systemd/schtasks).
 
 Subcommands:
-- `daemon status` (probes the Gateway RPC by default)
-- `daemon install` (service install)
-- `daemon uninstall`
-- `daemon start`
-- `daemon stop`
-- `daemon restart`
+- `gateway status` (probes the Gateway RPC by default)
+- `gateway install` (service install)
+- `gateway uninstall`
+- `gateway start`
+- `gateway stop`
+- `gateway restart`
 
 Notes:
-- `daemon status` probes the Gateway RPC by default using the daemon’s resolved port/config (override with `--url/--token/--password`).
-- `daemon status` supports `--no-probe`, `--deep`, and `--json` for scripting.
-- `daemon status` also surfaces legacy or extra gateway services when it can detect them (`--deep` adds system-level scans). Profile-named Clawdbot services are treated as first-class and aren't flagged as "extra".
-- `daemon status` prints which config path the CLI uses vs which config the daemon likely uses (service env), plus the resolved probe target URL.
-- `daemon install` defaults to Node runtime; bun is **not recommended** (WhatsApp/Telegram bugs).
-- `daemon install` options: `--port`, `--runtime`, `--token`, `--force`.
+- `gateway status` probes the Gateway RPC by default using the service’s resolved port/config (override with `--url/--token/--password`).
+- `gateway status` supports `--no-probe`, `--deep`, and `--json` for scripting.
+- `gateway status` also surfaces legacy or extra gateway services when it can detect them (`--deep` adds system-level scans). Profile-named Moltbot services are treated as first-class and aren't flagged as "extra".
+- `gateway status` prints which config path the CLI uses vs which config the service likely uses (service env), plus the resolved probe target URL.
+- `gateway install|uninstall|start|stop|restart` support `--json` for scripting (default output stays human-friendly).
+- `gateway install` defaults to Node runtime; bun is **not recommended** (WhatsApp/Telegram bugs).
+- `gateway install` options: `--port`, `--runtime`, `--token`, `--force`, `--json`.
 
 ### `logs`
 Tail Gateway file logs via RPC.
@@ -561,39 +639,47 @@ Notes:
 
 Examples:
 ```bash
-clawdbot logs --follow
-clawdbot logs --limit 200
-clawdbot logs --plain
-clawdbot logs --json
-clawdbot logs --no-color
+moltbot logs --follow
+moltbot logs --limit 200
+moltbot logs --plain
+moltbot logs --json
+moltbot logs --no-color
 ```
 
 ### `gateway <subcommand>`
-Gateway RPC helpers (use `--url`, `--token`, `--password`, `--timeout`, `--expect-final` for each).
+Gateway CLI helpers (use `--url`, `--token`, `--password`, `--timeout`, `--expect-final` for RPC subcommands).
 
 Subcommands:
 - `gateway call <method> [--params <json>]`
 - `gateway health`
 - `gateway status`
+- `gateway probe`
 - `gateway discover`
+- `gateway install|uninstall|start|stop|restart`
+- `gateway run`
 
 Common RPCs:
 - `config.apply` (validate + write config + restart + wake)
+- `config.patch` (merge a partial update + restart + wake)
 - `update.run` (run update + restart + wake)
+
+Tip: when calling `config.set`/`config.apply`/`config.patch` directly, pass `baseHash` from
+`config.get` if a config already exists.
 
 ## Models
 
 See [/concepts/models](/concepts/models) for fallback behavior and scanning strategy.
 
-Preferred Anthropic auth (CLI token, not API key):
+Preferred Anthropic auth (setup-token):
 
 ```bash
 claude setup-token
-clawdbot models status
+moltbot models auth setup-token --provider anthropic
+moltbot models status
 ```
 
 ### `models` (root)
-`clawdbot models` is an alias for `models status`.
+`moltbot models` is an alias for `models status`.
 
 Root options:
 - `--status-json` (alias for `models status --json`)
@@ -612,8 +698,15 @@ Options:
 - `--json`
 - `--plain`
 - `--check` (exit 1=expired/missing, 2=expiring)
+- `--probe` (live probe of configured auth profiles)
+- `--probe-provider <name>`
+- `--probe-profile <id>` (repeat or comma-separated)
+- `--probe-timeout <ms>`
+- `--probe-concurrency <n>`
+- `--probe-max-tokens <n>`
 
 Always includes the auth overview and OAuth expiry status for profiles in the auth store.
+`--probe` runs live requests (may consume tokens and trigger rate limits).
 
 ### `models set <model>`
 Set `agents.defaults.model.primary`.
@@ -668,9 +761,9 @@ Options:
 - `set`: `--provider <name>`, `--agent <id>`, `<profileIds...>`
 - `clear`: `--provider <name>`, `--agent <id>`
 
-## Cron + wake
+## System
 
-### `wake`
+### `system event`
 Enqueue a system event and optionally trigger a heartbeat (Gateway RPC).
 
 Required:
@@ -681,7 +774,21 @@ Options:
 - `--json`
 - `--url`, `--token`, `--timeout`, `--expect-final`
 
-### `cron`
+### `system heartbeat last|enable|disable`
+Heartbeat controls (Gateway RPC).
+
+Options:
+- `--json`
+- `--url`, `--token`, `--timeout`, `--expect-final`
+
+### `system presence`
+List system presence entries (Gateway RPC).
+
+Options:
+- `--json`
+- `--url`, `--token`, `--timeout`, `--expect-final`
+
+## Cron
 Manage scheduled jobs (Gateway RPC). See [/automation/cron-jobs](/automation/cron-jobs).
 
 Subcommands:
@@ -697,6 +804,19 @@ Subcommands:
 
 All `cron` commands accept `--url`, `--token`, `--timeout`, `--expect-final`.
 
+## Node host
+
+`node` runs a **headless node host** or manages it as a background service. See
+[`moltbot node`](/cli/node).
+
+Subcommands:
+- `node run --host <gateway-host> --port 18789`
+- `node status`
+- `node install [--host <gateway-host>] [--port <port>] [--tls] [--tls-fingerprint <sha256>] [--node-id <id>] [--display-name <name>] [--runtime <node|bun>] [--force]`
+- `node uninstall`
+- `node stop`
+- `node restart`
+
 ## Nodes
 
 `nodes` talks to the Gateway and targets paired nodes. See [/nodes](/nodes).
@@ -705,15 +825,15 @@ Common options:
 - `--url`, `--token`, `--timeout`, `--json`
 
 Subcommands:
-- `nodes status`
+- `nodes status [--connected] [--last-connected <duration>]`
 - `nodes describe --node <id|name|ip>`
-- `nodes list`
+- `nodes list [--connected] [--last-connected <duration>]`
 - `nodes pending`
 - `nodes approve <requestId>`
 - `nodes reject <requestId>`
 - `nodes rename --node <id|name|ip> --name <displayName>`
 - `nodes invoke --node <id|name|ip> --command <command> [--params <json>] [--invoke-timeout <ms>] [--idempotency-key <key>]`
-- `nodes run --node <id|name|ip> [--cwd <path>] [--env KEY=VAL] [--command-timeout <ms>] [--needs-screen-recording] [--invoke-timeout <ms>] <command...>` (mac only)
+- `nodes run --node <id|name|ip> [--cwd <path>] [--env KEY=VAL] [--command-timeout <ms>] [--needs-screen-recording] [--invoke-timeout <ms>] <command...>` (mac node or headless node host)
 - `nodes notify --node <id|name|ip> [--title <text>] [--body <text>] [--sound <name>] [--priority <passive|active|timeSensitive>] [--delivery <system|overlay|auto>] [--invoke-timeout <ms>]` (mac only)
 
 Camera:
@@ -736,12 +856,11 @@ Location:
 
 ## Browser
 
-Browser control CLI (dedicated Chrome/Chromium). See [/tools/browser](/tools/browser).
+Browser control CLI (dedicated Chrome/Brave/Edge/Chromium). See [`moltbot browser`](/cli/browser) and the [Browser tool](/tools/browser).
 
 Common options:
-- `--url <controlUrl>`
+- `--url`, `--token`, `--timeout`, `--json`
 - `--browser-profile <name>`
-- `--json`
 
 Manage:
 - `browser status`

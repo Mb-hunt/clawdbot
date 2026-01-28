@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S node --import tsx
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -28,7 +28,7 @@ function killGatewayListeners(port: number): PortProcess[] {
 function runTests() {
   const isolatedLock =
     process.env.CLAWDBOT_GATEWAY_LOCK ??
-    path.join(os.tmpdir(), `clawdbot-gateway.lock.test.${Date.now()}`);
+    path.join(os.tmpdir(), `moltbot-gateway.lock.test.${Date.now()}`);
   const result = spawnSync("pnpm", ["vitest", "run"], {
     stdio: "inherit",
     env: {

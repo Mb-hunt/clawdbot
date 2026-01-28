@@ -1,4 +1,4 @@
-import ClawdbotKit
+import MoltbotKit
 import Network
 import Observation
 import SwiftUI
@@ -18,15 +18,15 @@ final class NodeAppModel {
     let screen = ScreenController()
     let camera = CameraController()
     private let screenRecorder = ScreenRecordService()
-    var bridgeStatusText: String = "Offline"
-    var bridgeServerName: String?
-    var bridgeRemoteAddress: String?
-    var connectedBridgeID: String?
+    var gatewayStatusText: String = "Offline"
+    var gatewayServerName: String?
+    var gatewayRemoteAddress: String?
+    var connectedGatewayID: String?
     var seamColorHex: String?
     var mainSessionKey: String = "main"
 
-    private let bridge = BridgeSession()
-    private var bridgeTask: Task<Void, Never>?
+    private let gateway = GatewayNodeSession()
+    private var gatewayTask: Task<Void, Never>?
     private var voiceWakeSyncTask: Task<Void, Never>?
     @ObservationIgnored private var cameraHUDDismissTask: Task<Void, Never>?
     let voiceWake = VoiceWakeManager()
@@ -34,7 +34,8 @@ final class NodeAppModel {
     private let locationService = LocationService()
     private var lastAutoA2uiURL: String?
 
-    var bridgeSession: BridgeSession { self.bridge }
+    private var gatewayConnected = false
+    var gatewaySession: GatewayNodeSession { self.gateway }
 
     var cameraHUDText: String?
     var cameraHUDKind: CameraHUDKind?
@@ -54,7 +55,7 @@ final class NodeAppModel {
 
         let enabled = UserDefaults.standard.bool(forKey: "voiceWake.enabled")
         self.voiceWake.setEnabled(enabled)
-        self.talkMode.attachBridge(self.bridge)
+        self.talkMode.attachGateway(self.gateway)
         let talkEnabled = UserDefaults.standard.bool(forKey: "talk.enabled")
         self.talkMode.setEnabled(talkEnabled)
 
@@ -89,7 +90,7 @@ final class NodeAppModel {
         }()
         guard !userAction.isEmpty else { return }
 
-        guard let name = ClawdbotCanvasA2UIAction.extractActionName(userAction) else { return }
+        guard let name = MoltbotCanvasA2UIAction.extractActionName(userAction) else { return }
         let actionId: String = {
             let id = (userAction["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return id.isEmpty ? UUID().uuidString : id
@@ -108,21 +109,21 @@ final class NodeAppModel {
 
         let host = UserDefaults.standard.string(forKey: "node.displayName") ?? UIDevice.current.name
         let instanceId = (UserDefaults.standard.string(forKey: "node.instanceId") ?? "ios-node").lowercased()
-        let contextJSON = ClawdbotCanvasA2UIAction.compactJSON(userAction["context"])
-        let sessionKey = "main"
+        let contextJSON = MoltbotCanvasA2UIAction.compactJSON(userAction["context"])
+        let sessionKey = self.mainSessionKey
 
-        let messageContext = ClawdbotCanvasA2UIAction.AgentMessageContext(
+        let messageContext = MoltbotCanvasA2UIAction.AgentMessageContext(
             actionName: name,
             session: .init(key: sessionKey, surfaceId: surfaceId),
             component: .init(id: sourceComponentId, host: host, instanceId: instanceId),
             contextJSON: contextJSON)
-        let message = ClawdbotCanvasA2UIAction.formatAgentMessage(messageContext)
+        let message = MoltbotCanvasA2UIAction.formatAgentMessage(messageContext)
 
         let ok: Bool
         var errorText: String?
-        if await !self.isBridgeConnected() {
+        if await !self.isGatewayConnected() {
             ok = false
-            errorText = "bridge not connected"
+            errorText = "gateway not connected"
         } else {
             do {
                 try await self.sendAgentRequest(link: AgentDeepLink(
@@ -141,7 +142,7 @@ final class NodeAppModel {
             }
         }
 
-        let js = ClawdbotCanvasA2UIAction.jsDispatchA2UIActionStatus(actionId: actionId, ok: ok, error: errorText)
+        let js = MoltbotCanvasA2UIAction.jsDispatchA2UIActionStatus(actionId: actionId, ok: ok, error: errorText)
         do {
             _ = try await self.screen.eval(javaScript: js)
         } catch {
@@ -150,10 +151,10 @@ final class NodeAppModel {
     }
 
     private func resolveA2UIHostURL() async -> String? {
-        guard let raw = await self.bridge.currentCanvasHostUrl() else { return nil }
+        guard let raw = await self.gateway.currentCanvasHostUrl() else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let base = URL(string: trimmed) else { return nil }
-        return base.appendingPathComponent("__clawdbot__/a2ui/").absoluteString + "?platform=ios"
+        return base.appendingPathComponent("__moltbot__/a2ui/").absoluteString + "?platform=ios"
     }
 
     private func showA2UIOnConnectIfNeeded() async {
@@ -189,7 +190,7 @@ final class NodeAppModel {
         self.talkMode.setEnabled(enabled)
     }
 
-    func requestLocationPermissions(mode: ClawdbotLocationMode) async -> Bool {
+    func requestLocationPermissions(mode: MoltbotLocationMode) async -> Bool {
         guard mode != .off else { return true }
         let status = await self.locationService.ensureAuthorization(mode: mode)
         switch status {
@@ -202,57 +203,76 @@ final class NodeAppModel {
         }
     }
 
-    func connectToBridge(
-        endpoint: NWEndpoint,
-        bridgeStableID: String,
-        hello: BridgeHello)
+    func connectToGateway(
+        url: URL,
+        gatewayStableID: String,
+        tls: GatewayTLSParams?,
+        token: String?,
+        password: String?,
+        connectOptions: GatewayConnectOptions)
     {
-        self.bridgeTask?.cancel()
-        self.bridgeServerName = nil
-        self.bridgeRemoteAddress = nil
-        let id = bridgeStableID.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.connectedBridgeID = id.isEmpty ? BridgeEndpointID.stableID(endpoint) : id
+        self.gatewayTask?.cancel()
+        self.gatewayServerName = nil
+        self.gatewayRemoteAddress = nil
+        let id = gatewayStableID.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.connectedGatewayID = id.isEmpty ? url.absoluteString : id
+        self.gatewayConnected = false
         self.voiceWakeSyncTask?.cancel()
         self.voiceWakeSyncTask = nil
+        let sessionBox = tls.map { WebSocketSessionBox(session: GatewayTLSPinningSession(params: $0)) }
 
-        self.bridgeTask = Task {
+        self.gatewayTask = Task {
             var attempt = 0
             while !Task.isCancelled {
                 await MainActor.run {
                     if attempt == 0 {
-                        self.bridgeStatusText = "Connecting…"
+                        self.gatewayStatusText = "Connecting…"
                     } else {
-                        self.bridgeStatusText = "Reconnecting…"
+                        self.gatewayStatusText = "Reconnecting…"
                     }
-                    self.bridgeServerName = nil
-                    self.bridgeRemoteAddress = nil
+                    self.gatewayServerName = nil
+                    self.gatewayRemoteAddress = nil
                 }
 
                 do {
-                    try await self.bridge.connect(
-                        endpoint: endpoint,
-                        hello: hello,
-                        onConnected: { [weak self] serverName in
+                    try await self.gateway.connect(
+                        url: url,
+                        token: token,
+                        password: password,
+                        connectOptions: connectOptions,
+                        sessionBox: sessionBox,
+                        onConnected: { [weak self] in
                             guard let self else { return }
                             await MainActor.run {
-                                self.bridgeStatusText = "Connected"
-                                self.bridgeServerName = serverName
+                                self.gatewayStatusText = "Connected"
+                                self.gatewayServerName = url.host ?? "gateway"
+                                self.gatewayConnected = true
                             }
-                            if let addr = await self.bridge.currentRemoteAddress() {
+                            if let addr = await self.gateway.currentRemoteAddress() {
                                 await MainActor.run {
-                                    self.bridgeRemoteAddress = addr
+                                    self.gatewayRemoteAddress = addr
                                 }
                             }
                             await self.refreshBrandingFromGateway()
                             await self.startVoiceWakeSync()
                             await self.showA2UIOnConnectIfNeeded()
                         },
+                        onDisconnected: { [weak self] reason in
+                            guard let self else { return }
+                            await MainActor.run {
+                                self.gatewayStatusText = "Disconnected"
+                                self.gatewayRemoteAddress = nil
+                                self.gatewayConnected = false
+                                self.showLocalCanvasOnDisconnect()
+                                self.gatewayStatusText = "Disconnected: \(reason)"
+                            }
+                        },
                         onInvoke: { [weak self] req in
                             guard let self else {
                                 return BridgeInvokeResponse(
                                     id: req.id,
                                     ok: false,
-                                    error: ClawdbotNodeError(
+                                    error: MoltbotNodeError(
                                         code: .unavailable,
                                         message: "UNAVAILABLE: node not ready"))
                             }
@@ -260,19 +280,16 @@ final class NodeAppModel {
                         })
 
                     if Task.isCancelled { break }
-                    await MainActor.run {
-                        self.showLocalCanvasOnDisconnect()
-                    }
-                    attempt += 1
-                    let sleepSeconds = min(6.0, 0.35 * pow(1.7, Double(attempt)))
-                    try? await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
+                    attempt = 0
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                 } catch {
                     if Task.isCancelled { break }
                     attempt += 1
                     await MainActor.run {
-                        self.bridgeStatusText = "Bridge error: \(error.localizedDescription)"
-                        self.bridgeServerName = nil
-                        self.bridgeRemoteAddress = nil
+                        self.gatewayStatusText = "Gateway error: \(error.localizedDescription)"
+                        self.gatewayServerName = nil
+                        self.gatewayRemoteAddress = nil
+                        self.gatewayConnected = false
                         self.showLocalCanvasOnDisconnect()
                     }
                     let sleepSeconds = min(8.0, 0.5 * pow(1.7, Double(attempt)))
@@ -281,30 +298,48 @@ final class NodeAppModel {
             }
 
             await MainActor.run {
-                self.bridgeStatusText = "Offline"
-                self.bridgeServerName = nil
-                self.bridgeRemoteAddress = nil
-                self.connectedBridgeID = nil
+                self.gatewayStatusText = "Offline"
+                self.gatewayServerName = nil
+                self.gatewayRemoteAddress = nil
+                self.connectedGatewayID = nil
+                self.gatewayConnected = false
                 self.seamColorHex = nil
-                self.mainSessionKey = "main"
+                if !SessionKey.isCanonicalMainSessionKey(self.mainSessionKey) {
+                    self.mainSessionKey = "main"
+                    self.talkMode.updateMainSessionKey(self.mainSessionKey)
+                }
                 self.showLocalCanvasOnDisconnect()
             }
         }
     }
 
-    func disconnectBridge() {
-        self.bridgeTask?.cancel()
-        self.bridgeTask = nil
+    func disconnectGateway() {
+        self.gatewayTask?.cancel()
+        self.gatewayTask = nil
         self.voiceWakeSyncTask?.cancel()
         self.voiceWakeSyncTask = nil
-        Task { await self.bridge.disconnect() }
-        self.bridgeStatusText = "Offline"
-        self.bridgeServerName = nil
-        self.bridgeRemoteAddress = nil
-        self.connectedBridgeID = nil
+        Task { await self.gateway.disconnect() }
+        self.gatewayStatusText = "Offline"
+        self.gatewayServerName = nil
+        self.gatewayRemoteAddress = nil
+        self.connectedGatewayID = nil
+        self.gatewayConnected = false
         self.seamColorHex = nil
-        self.mainSessionKey = "main"
+        if !SessionKey.isCanonicalMainSessionKey(self.mainSessionKey) {
+            self.mainSessionKey = "main"
+            self.talkMode.updateMainSessionKey(self.mainSessionKey)
+        }
         self.showLocalCanvasOnDisconnect()
+    }
+
+    private func applyMainSessionKey(_ key: String?) {
+        let trimmed = (key ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let current = self.mainSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if SessionKey.isCanonicalMainSessionKey(current) { return }
+        if trimmed == current { return }
+        self.mainSessionKey = trimmed
+        self.talkMode.updateMainSessionKey(trimmed)
     }
 
     var seamColor: Color {
@@ -326,7 +361,7 @@ final class NodeAppModel {
 
     private func refreshBrandingFromGateway() async {
         do {
-            let res = try await self.bridge.request(method: "config.get", paramsJSON: "{}", timeoutSeconds: 8)
+            let res = try await self.gateway.request(method: "config.get", paramsJSON: "{}", timeoutSeconds: 8)
             guard let json = try JSONSerialization.jsonObject(with: res) as? [String: Any] else { return }
             guard let config = json["config"] as? [String: Any] else { return }
             let ui = config["ui"] as? [String: Any]
@@ -335,7 +370,10 @@ final class NodeAppModel {
             let mainKey = SessionKey.normalizeMainKey(session?["mainKey"] as? String)
             await MainActor.run {
                 self.seamColorHex = raw.isEmpty ? nil : raw
-                self.mainSessionKey = mainKey
+                if !SessionKey.isCanonicalMainSessionKey(self.mainSessionKey) {
+                    self.mainSessionKey = mainKey
+                    self.talkMode.updateMainSessionKey(mainKey)
+                }
             }
         } catch {
             // ignore
@@ -354,7 +392,7 @@ final class NodeAppModel {
         else { return }
 
         do {
-            _ = try await self.bridge.request(method: "voicewake.set", paramsJSON: json, timeoutSeconds: 12)
+            _ = try await self.gateway.request(method: "voicewake.set", paramsJSON: json, timeoutSeconds: 12)
         } catch {
             // Best-effort only.
         }
@@ -367,12 +405,14 @@ final class NodeAppModel {
 
             await self.refreshWakeWordsFromGateway()
 
-            let stream = await self.bridge.subscribeServerEvents(bufferingNewest: 200)
+            let stream = await self.gateway.subscribeServerEvents(bufferingNewest: 200)
             for await evt in stream {
                 if Task.isCancelled { return }
                 guard evt.event == "voicewake.changed" else { continue }
-                guard let payloadJSON = evt.payloadJSON else { continue }
-                guard let triggers = VoiceWakePreferences.decodeGatewayTriggers(from: payloadJSON) else { continue }
+                guard let payload = evt.payload else { continue }
+                struct Payload: Decodable { var triggers: [String] }
+                guard let decoded = try? GatewayPayloadDecoding.decode(payload, as: Payload.self) else { continue }
+                let triggers = VoiceWakePreferences.sanitizeTriggerWords(decoded.triggers)
                 VoiceWakePreferences.saveTriggerWords(triggers)
             }
         }
@@ -380,7 +420,7 @@ final class NodeAppModel {
 
     private func refreshWakeWordsFromGateway() async {
         do {
-            let data = try await self.bridge.request(method: "voicewake.get", paramsJSON: "{}", timeoutSeconds: 8)
+            let data = try await self.gateway.request(method: "voicewake.get", paramsJSON: "{}", timeoutSeconds: 8)
             guard let triggers = VoiceWakePreferences.decodeGatewayTriggers(from: data) else { return }
             VoiceWakePreferences.saveTriggerWords(triggers)
         } catch {
@@ -389,6 +429,11 @@ final class NodeAppModel {
     }
 
     func sendVoiceTranscript(text: String, sessionKey: String?) async throws {
+        if await !self.isGatewayConnected() {
+            throw NSError(domain: "Gateway", code: 10, userInfo: [
+                NSLocalizedDescriptionKey: "Gateway not connected",
+            ])
+        }
         struct Payload: Codable {
             var text: String
             var sessionKey: String?
@@ -400,7 +445,7 @@ final class NodeAppModel {
                 NSLocalizedDescriptionKey: "Failed to encode voice transcript payload as UTF-8",
             ])
         }
-        try await self.bridge.sendEvent(event: "voice.transcript", payloadJSON: json)
+        await self.gateway.sendEvent(event: "voice.transcript", payloadJSON: json)
     }
 
     func handleDeepLink(url: URL) async {
@@ -421,8 +466,8 @@ final class NodeAppModel {
             return
         }
 
-        guard await self.isBridgeConnected() else {
-            self.screen.errorText = "Bridge not connected (cannot forward deep link)."
+        guard await self.isGatewayConnected() else {
+            self.screen.errorText = "Gateway not connected (cannot forward deep link)."
             return
         }
 
@@ -441,20 +486,19 @@ final class NodeAppModel {
             ])
         }
 
-        // iOS bridge forwards to the gateway; no local auth prompts here.
-        // (Key-based unattended auth is handled on macOS for clawdbot:// links.)
+        // iOS gateway forwards to the gateway; no local auth prompts here.
+        // (Key-based unattended auth is handled on macOS for moltbot:// links.)
         let data = try JSONEncoder().encode(link)
         guard let json = String(bytes: data, encoding: .utf8) else {
             throw NSError(domain: "NodeAppModel", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to encode agent request payload as UTF-8",
             ])
         }
-        try await self.bridge.sendEvent(event: "agent.request", payloadJSON: json)
+        await self.gateway.sendEvent(event: "agent.request", payloadJSON: json)
     }
 
-    private func isBridgeConnected() async -> Bool {
-        if case .connected = await self.bridge.state { return true }
-        return false
+    private func isGatewayConnected() async -> Bool {
+        self.gatewayConnected
     }
 
     private func handleInvoke(_ req: BridgeInvokeRequest) async -> BridgeInvokeResponse {
@@ -464,7 +508,7 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .backgroundUnavailable,
                     message: "NODE_BACKGROUND_UNAVAILABLE: canvas/camera/screen commands require foreground"))
         }
@@ -473,36 +517,36 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .unavailable,
                     message: "CAMERA_DISABLED: enable Camera in iOS Settings → Camera → Allow Camera"))
         }
 
         do {
             switch command {
-            case ClawdbotLocationCommand.get.rawValue:
+            case MoltbotLocationCommand.get.rawValue:
                 return try await self.handleLocationInvoke(req)
-            case ClawdbotCanvasCommand.present.rawValue,
-                 ClawdbotCanvasCommand.hide.rawValue,
-                 ClawdbotCanvasCommand.navigate.rawValue,
-                 ClawdbotCanvasCommand.evalJS.rawValue,
-                 ClawdbotCanvasCommand.snapshot.rawValue:
+            case MoltbotCanvasCommand.present.rawValue,
+                 MoltbotCanvasCommand.hide.rawValue,
+                 MoltbotCanvasCommand.navigate.rawValue,
+                 MoltbotCanvasCommand.evalJS.rawValue,
+                 MoltbotCanvasCommand.snapshot.rawValue:
                 return try await self.handleCanvasInvoke(req)
-            case ClawdbotCanvasA2UICommand.reset.rawValue,
-                 ClawdbotCanvasA2UICommand.push.rawValue,
-                 ClawdbotCanvasA2UICommand.pushJSONL.rawValue:
+            case MoltbotCanvasA2UICommand.reset.rawValue,
+                 MoltbotCanvasA2UICommand.push.rawValue,
+                 MoltbotCanvasA2UICommand.pushJSONL.rawValue:
                 return try await self.handleCanvasA2UIInvoke(req)
-            case ClawdbotCameraCommand.list.rawValue,
-                 ClawdbotCameraCommand.snap.rawValue,
-                 ClawdbotCameraCommand.clip.rawValue:
+            case MoltbotCameraCommand.list.rawValue,
+                 MoltbotCameraCommand.snap.rawValue,
+                 MoltbotCameraCommand.clip.rawValue:
                 return try await self.handleCameraInvoke(req)
-            case ClawdbotScreenCommand.record.rawValue:
+            case MoltbotScreenCommand.record.rawValue:
                 return try await self.handleScreenRecordInvoke(req)
             default:
                 return BridgeInvokeResponse(
                     id: req.id,
                     ok: false,
-                    error: ClawdbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
+                    error: MoltbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
             }
         } catch {
             if command.hasPrefix("camera.") {
@@ -512,7 +556,7 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(code: .unavailable, message: error.localizedDescription))
+                error: MoltbotNodeError(code: .unavailable, message: error.localizedDescription))
         }
     }
 
@@ -526,7 +570,7 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .unavailable,
                     message: "LOCATION_DISABLED: enable Location in Settings"))
         }
@@ -534,12 +578,12 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .backgroundUnavailable,
                     message: "LOCATION_BACKGROUND_UNAVAILABLE: background location requires Always"))
         }
-        let params = (try? Self.decodeParams(ClawdbotLocationGetParams.self, from: req.paramsJSON)) ??
-            ClawdbotLocationGetParams()
+        let params = (try? Self.decodeParams(MoltbotLocationGetParams.self, from: req.paramsJSON)) ??
+            MoltbotLocationGetParams()
         let desired = params.desiredAccuracy ??
             (self.isLocationPreciseEnabled() ? .precise : .balanced)
         let status = self.locationService.authorizationStatus()
@@ -547,7 +591,7 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .unavailable,
                     message: "LOCATION_PERMISSION_REQUIRED: grant Location permission"))
         }
@@ -555,7 +599,7 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(
+                error: MoltbotNodeError(
                     code: .unavailable,
                     message: "LOCATION_PERMISSION_REQUIRED: enable Always for background access"))
         }
@@ -565,7 +609,7 @@ final class NodeAppModel {
             maxAgeMs: params.maxAgeMs,
             timeoutMs: params.timeoutMs)
         let isPrecise = self.locationService.accuracyAuthorization() == .fullAccuracy
-        let payload = ClawdbotLocationPayload(
+        let payload = MoltbotLocationPayload(
             lat: location.coordinate.latitude,
             lon: location.coordinate.longitude,
             accuracyMeters: location.horizontalAccuracy,
@@ -581,9 +625,9 @@ final class NodeAppModel {
 
     private func handleCanvasInvoke(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
         switch req.command {
-        case ClawdbotCanvasCommand.present.rawValue:
-            let params = (try? Self.decodeParams(ClawdbotCanvasPresentParams.self, from: req.paramsJSON)) ??
-                ClawdbotCanvasPresentParams()
+        case MoltbotCanvasCommand.present.rawValue:
+            let params = (try? Self.decodeParams(MoltbotCanvasPresentParams.self, from: req.paramsJSON)) ??
+                MoltbotCanvasPresentParams()
             let url = params.url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if url.isEmpty {
                 self.screen.showDefaultCanvas()
@@ -591,19 +635,19 @@ final class NodeAppModel {
                 self.screen.navigate(to: url)
             }
             return BridgeInvokeResponse(id: req.id, ok: true)
-        case ClawdbotCanvasCommand.hide.rawValue:
+        case MoltbotCanvasCommand.hide.rawValue:
             return BridgeInvokeResponse(id: req.id, ok: true)
-        case ClawdbotCanvasCommand.navigate.rawValue:
-            let params = try Self.decodeParams(ClawdbotCanvasNavigateParams.self, from: req.paramsJSON)
+        case MoltbotCanvasCommand.navigate.rawValue:
+            let params = try Self.decodeParams(MoltbotCanvasNavigateParams.self, from: req.paramsJSON)
             self.screen.navigate(to: params.url)
             return BridgeInvokeResponse(id: req.id, ok: true)
-        case ClawdbotCanvasCommand.evalJS.rawValue:
-            let params = try Self.decodeParams(ClawdbotCanvasEvalParams.self, from: req.paramsJSON)
+        case MoltbotCanvasCommand.evalJS.rawValue:
+            let params = try Self.decodeParams(MoltbotCanvasEvalParams.self, from: req.paramsJSON)
             let result = try await self.screen.eval(javaScript: params.javaScript)
             let payload = try Self.encodePayload(["result": result])
             return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: payload)
-        case ClawdbotCanvasCommand.snapshot.rawValue:
-            let params = try? Self.decodeParams(ClawdbotCanvasSnapshotParams.self, from: req.paramsJSON)
+        case MoltbotCanvasCommand.snapshot.rawValue:
+            let params = try? Self.decodeParams(MoltbotCanvasSnapshotParams.self, from: req.paramsJSON)
             let format = params?.format ?? .jpeg
             let maxWidth: CGFloat? = {
                 if let raw = params?.maxWidth, raw > 0 { return CGFloat(raw) }
@@ -627,19 +671,19 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
+                error: MoltbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
         }
     }
 
     private func handleCanvasA2UIInvoke(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
         let command = req.command
         switch command {
-        case ClawdbotCanvasA2UICommand.reset.rawValue:
+        case MoltbotCanvasA2UICommand.reset.rawValue:
             guard let a2uiUrl = await self.resolveA2UIHostURL() else {
                 return BridgeInvokeResponse(
                     id: req.id,
                     ok: false,
-                    error: ClawdbotNodeError(
+                    error: MoltbotNodeError(
                         code: .unavailable,
                         message: "A2UI_HOST_NOT_CONFIGURED: gateway did not advertise canvas host"))
             }
@@ -648,31 +692,31 @@ final class NodeAppModel {
                 return BridgeInvokeResponse(
                     id: req.id,
                     ok: false,
-                    error: ClawdbotNodeError(
+                    error: MoltbotNodeError(
                         code: .unavailable,
                         message: "A2UI_HOST_UNAVAILABLE: A2UI host not reachable"))
             }
 
             let json = try await self.screen.eval(javaScript: """
             (() => {
-              if (!globalThis.clawdbotA2UI) return JSON.stringify({ ok: false, error: "missing clawdbotA2UI" });
+              if (!globalThis.clawdbotA2UI) return JSON.stringify({ ok: false, error: "missing moltbotA2UI" });
               return JSON.stringify(globalThis.clawdbotA2UI.reset());
             })()
             """)
             return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: json)
-        case ClawdbotCanvasA2UICommand.push.rawValue, ClawdbotCanvasA2UICommand.pushJSONL.rawValue:
+        case MoltbotCanvasA2UICommand.push.rawValue, MoltbotCanvasA2UICommand.pushJSONL.rawValue:
             let messages: [AnyCodable]
-            if command == ClawdbotCanvasA2UICommand.pushJSONL.rawValue {
-                let params = try Self.decodeParams(ClawdbotCanvasA2UIPushJSONLParams.self, from: req.paramsJSON)
-                messages = try ClawdbotCanvasA2UIJSONL.decodeMessagesFromJSONL(params.jsonl)
+            if command == MoltbotCanvasA2UICommand.pushJSONL.rawValue {
+                let params = try Self.decodeParams(MoltbotCanvasA2UIPushJSONLParams.self, from: req.paramsJSON)
+                messages = try MoltbotCanvasA2UIJSONL.decodeMessagesFromJSONL(params.jsonl)
             } else {
                 do {
-                    let params = try Self.decodeParams(ClawdbotCanvasA2UIPushParams.self, from: req.paramsJSON)
+                    let params = try Self.decodeParams(MoltbotCanvasA2UIPushParams.self, from: req.paramsJSON)
                     messages = params.messages
                 } catch {
                     // Be forgiving: some clients still send JSONL payloads to `canvas.a2ui.push`.
-                    let params = try Self.decodeParams(ClawdbotCanvasA2UIPushJSONLParams.self, from: req.paramsJSON)
-                    messages = try ClawdbotCanvasA2UIJSONL.decodeMessagesFromJSONL(params.jsonl)
+                    let params = try Self.decodeParams(MoltbotCanvasA2UIPushJSONLParams.self, from: req.paramsJSON)
+                    messages = try MoltbotCanvasA2UIJSONL.decodeMessagesFromJSONL(params.jsonl)
                 }
             }
 
@@ -680,7 +724,7 @@ final class NodeAppModel {
                 return BridgeInvokeResponse(
                     id: req.id,
                     ok: false,
-                    error: ClawdbotNodeError(
+                    error: MoltbotNodeError(
                         code: .unavailable,
                         message: "A2UI_HOST_NOT_CONFIGURED: gateway did not advertise canvas host"))
             }
@@ -689,16 +733,16 @@ final class NodeAppModel {
                 return BridgeInvokeResponse(
                     id: req.id,
                     ok: false,
-                    error: ClawdbotNodeError(
+                    error: MoltbotNodeError(
                         code: .unavailable,
                         message: "A2UI_HOST_UNAVAILABLE: A2UI host not reachable"))
             }
 
-            let messagesJSON = try ClawdbotCanvasA2UIJSONL.encodeMessagesJSONArray(messages)
+            let messagesJSON = try MoltbotCanvasA2UIJSONL.encodeMessagesJSONArray(messages)
             let js = """
             (() => {
               try {
-                if (!globalThis.clawdbotA2UI) return JSON.stringify({ ok: false, error: "missing clawdbotA2UI" });
+                if (!globalThis.clawdbotA2UI) return JSON.stringify({ ok: false, error: "missing moltbotA2UI" });
                 const messages = \(messagesJSON);
                 return JSON.stringify(globalThis.clawdbotA2UI.applyMessages(messages));
               } catch (e) {
@@ -712,24 +756,24 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
+                error: MoltbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
         }
     }
 
     private func handleCameraInvoke(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
         switch req.command {
-        case ClawdbotCameraCommand.list.rawValue:
+        case MoltbotCameraCommand.list.rawValue:
             let devices = await self.camera.listDevices()
             struct Payload: Codable {
                 var devices: [CameraController.CameraDeviceInfo]
             }
             let payload = try Self.encodePayload(Payload(devices: devices))
             return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: payload)
-        case ClawdbotCameraCommand.snap.rawValue:
+        case MoltbotCameraCommand.snap.rawValue:
             self.showCameraHUD(text: "Taking photo…", kind: .photo)
             self.triggerCameraFlash()
-            let params = (try? Self.decodeParams(ClawdbotCameraSnapParams.self, from: req.paramsJSON)) ??
-                ClawdbotCameraSnapParams()
+            let params = (try? Self.decodeParams(MoltbotCameraSnapParams.self, from: req.paramsJSON)) ??
+                MoltbotCameraSnapParams()
             let res = try await self.camera.snap(params: params)
 
             struct Payload: Codable {
@@ -745,9 +789,9 @@ final class NodeAppModel {
                 height: res.height))
             self.showCameraHUD(text: "Photo captured", kind: .success, autoHideSeconds: 1.6)
             return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: payload)
-        case ClawdbotCameraCommand.clip.rawValue:
-            let params = (try? Self.decodeParams(ClawdbotCameraClipParams.self, from: req.paramsJSON)) ??
-                ClawdbotCameraClipParams()
+        case MoltbotCameraCommand.clip.rawValue:
+            let params = (try? Self.decodeParams(MoltbotCameraClipParams.self, from: req.paramsJSON)) ??
+                MoltbotCameraClipParams()
 
             let suspended = (params.includeAudio ?? true) ? self.voiceWake.suspendForExternalAudioCapture() : false
             defer { self.voiceWake.resumeAfterExternalAudioCapture(wasSuspended: suspended) }
@@ -772,13 +816,13 @@ final class NodeAppModel {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
-                error: ClawdbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
+                error: MoltbotNodeError(code: .invalidRequest, message: "INVALID_REQUEST: unknown command"))
         }
     }
 
     private func handleScreenRecordInvoke(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
-        let params = (try? Self.decodeParams(ClawdbotScreenRecordParams.self, from: req.paramsJSON)) ??
-            ClawdbotScreenRecordParams()
+        let params = (try? Self.decodeParams(MoltbotScreenRecordParams.self, from: req.paramsJSON)) ??
+            MoltbotScreenRecordParams()
         if let format = params.format, format.lowercased() != "mp4" {
             throw NSError(domain: "Screen", code: 30, userInfo: [
                 NSLocalizedDescriptionKey: "INVALID_REQUEST: screen format must be mp4",
@@ -793,7 +837,7 @@ final class NodeAppModel {
             fps: params.fps,
             includeAudio: params.includeAudio,
             outPath: nil)
-        defer { try? FileManager.default.removeItem(atPath: path) }
+        defer { try? FileManager().removeItem(atPath: path) }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         struct Payload: Codable {
             var format: String
@@ -813,26 +857,29 @@ final class NodeAppModel {
         return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: payload)
     }
 
-    private func locationMode() -> ClawdbotLocationMode {
+}
+
+private extension NodeAppModel {
+    func locationMode() -> MoltbotLocationMode {
         let raw = UserDefaults.standard.string(forKey: "location.enabledMode") ?? "off"
-        return ClawdbotLocationMode(rawValue: raw) ?? .off
+        return MoltbotLocationMode(rawValue: raw) ?? .off
     }
 
-    private func isLocationPreciseEnabled() -> Bool {
+    func isLocationPreciseEnabled() -> Bool {
         if UserDefaults.standard.object(forKey: "location.preciseEnabled") == nil { return true }
         return UserDefaults.standard.bool(forKey: "location.preciseEnabled")
     }
 
-    private static func decodeParams<T: Decodable>(_ type: T.Type, from json: String?) throws -> T {
+    static func decodeParams<T: Decodable>(_ type: T.Type, from json: String?) throws -> T {
         guard let json, let data = json.data(using: .utf8) else {
-            throw NSError(domain: "Bridge", code: 20, userInfo: [
+            throw NSError(domain: "Gateway", code: 20, userInfo: [
                 NSLocalizedDescriptionKey: "INVALID_REQUEST: paramsJSON required",
             ])
         }
         return try JSONDecoder().decode(type, from: data)
     }
 
-    private static func encodePayload(_ obj: some Encodable) throws -> String {
+    static func encodePayload(_ obj: some Encodable) throws -> String {
         let data = try JSONEncoder().encode(obj)
         guard let json = String(bytes: data, encoding: .utf8) else {
             throw NSError(domain: "NodeAppModel", code: 21, userInfo: [
@@ -842,17 +889,17 @@ final class NodeAppModel {
         return json
     }
 
-    private func isCameraEnabled() -> Bool {
+    func isCameraEnabled() -> Bool {
         // Default-on: if the key doesn't exist yet, treat it as enabled.
         if UserDefaults.standard.object(forKey: "camera.enabled") == nil { return true }
         return UserDefaults.standard.bool(forKey: "camera.enabled")
     }
 
-    private func triggerCameraFlash() {
+    func triggerCameraFlash() {
         self.cameraFlashNonce &+= 1
     }
 
-    private func showCameraHUD(text: String, kind: CameraHUDKind, autoHideSeconds: Double? = nil) {
+    func showCameraHUD(text: String, kind: CameraHUDKind, autoHideSeconds: Double? = nil) {
         self.cameraHUDDismissTask?.cancel()
 
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {

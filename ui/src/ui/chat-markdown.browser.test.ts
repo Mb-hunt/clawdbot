@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ClawdbotApp } from "./app";
+import { MoltbotApp } from "./app";
 
-const originalConnect = ClawdbotApp.prototype.connect;
+const originalConnect = MoltbotApp.prototype.connect;
 
 function mountApp(pathname: string) {
   window.history.replaceState({}, "", pathname);
-  const app = document.createElement("clawdbot-app") as ClawdbotApp;
+  const app = document.createElement("moltbot-app") as MoltbotApp;
   document.body.append(app);
   return app;
 }
 
 beforeEach(() => {
-  ClawdbotApp.prototype.connect = () => {
+  MoltbotApp.prototype.connect = () => {
     // no-op: avoid real gateway WS connections in browser tests
   };
   window.__CLAWDBOT_CONTROL_UI_BASE_PATH__ = undefined;
@@ -21,19 +21,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  ClawdbotApp.prototype.connect = originalConnect;
+  MoltbotApp.prototype.connect = originalConnect;
   window.__CLAWDBOT_CONTROL_UI_BASE_PATH__ = undefined;
   localStorage.clear();
   document.body.innerHTML = "";
 });
 
 describe("chat markdown rendering", () => {
-  it("renders markdown inside tool result cards", async () => {
-    localStorage.setItem(
-      "clawdbot.control.settings.v1",
-      JSON.stringify({ useNewChatLayout: false }),
-    );
-
+  it("renders markdown inside tool output sidebar", async () => {
     const app = mountApp("/chat");
     await app.updateComplete;
 
@@ -48,12 +43,21 @@ describe("chat markdown rendering", () => {
         timestamp,
       },
     ];
-    // Expand the tool output card so its markdown is rendered into the DOM.
-    app.toolOutputExpanded = new Set([`${timestamp}:1`]);
 
     await app.updateComplete;
 
-    const strong = app.querySelector(".chat-tool-card__output strong");
+    const toolCards = Array.from(
+      app.querySelectorAll<HTMLElement>(".chat-tool-card"),
+    );
+    const toolCard = toolCards.find((card) =>
+      card.querySelector(".chat-tool-card__preview, .chat-tool-card__inline"),
+    );
+    expect(toolCard).not.toBeUndefined();
+    toolCard?.click();
+
+    await app.updateComplete;
+
+    const strong = app.querySelector(".sidebar-markdown strong");
     expect(strong?.textContent).toBe("world");
   });
 });

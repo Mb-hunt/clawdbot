@@ -1,20 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import { resolveOAuthDir } from "../config/paths.js";
-import type {
-  DmPolicy,
-  GroupPolicy,
-  WhatsAppAccountConfig,
-} from "../config/types.js";
+import type { DmPolicy, GroupPolicy, WhatsAppAccountConfig } from "../config/types.js";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
+import { hasWebCredsSync } from "./auth-store.js";
 
 export type ResolvedWhatsAppAccount = {
   accountId: string;
   name?: string;
   enabled: boolean;
+  sendReadReceipts: boolean;
   messagePrefix?: string;
   authDir: string;
   isLegacyAuthDir: boolean;
@@ -24,32 +22,61 @@ export type ResolvedWhatsAppAccount = {
   groupPolicy?: GroupPolicy;
   dmPolicy?: DmPolicy;
   textChunkLimit?: number;
+  chunkMode?: "length" | "newline";
   mediaMaxMb?: number;
   blockStreaming?: boolean;
   ackReaction?: WhatsAppAccountConfig["ackReaction"];
   groups?: WhatsAppAccountConfig["groups"];
+  debounceMs?: number;
 };
 
-function listConfiguredAccountIds(cfg: ClawdbotConfig): string[] {
+function listConfiguredAccountIds(cfg: MoltbotConfig): string[] {
   const accounts = cfg.channels?.whatsapp?.accounts;
   if (!accounts || typeof accounts !== "object") return [];
   return Object.keys(accounts).filter(Boolean);
 }
 
-export function listWhatsAppAccountIds(cfg: ClawdbotConfig): string[] {
+export function listWhatsAppAuthDirs(cfg: MoltbotConfig): string[] {
+  const oauthDir = resolveOAuthDir();
+  const whatsappDir = path.join(oauthDir, "whatsapp");
+  const authDirs = new Set<string>([oauthDir, path.join(whatsappDir, DEFAULT_ACCOUNT_ID)]);
+
+  const accountIds = listConfiguredAccountIds(cfg);
+  for (const accountId of accountIds) {
+    authDirs.add(resolveWhatsAppAuthDir({ cfg, accountId }).authDir);
+  }
+
+  try {
+    const entries = fs.readdirSync(whatsappDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      authDirs.add(path.join(whatsappDir, entry.name));
+    }
+  } catch {
+    // ignore missing dirs
+  }
+
+  return Array.from(authDirs);
+}
+
+export function hasAnyWhatsAppAuth(cfg: MoltbotConfig): boolean {
+  return listWhatsAppAuthDirs(cfg).some((authDir) => hasWebCredsSync(authDir));
+}
+
+export function listWhatsAppAccountIds(cfg: MoltbotConfig): string[] {
   const ids = listConfiguredAccountIds(cfg);
   if (ids.length === 0) return [DEFAULT_ACCOUNT_ID];
   return ids.sort((a, b) => a.localeCompare(b));
 }
 
-export function resolveDefaultWhatsAppAccountId(cfg: ClawdbotConfig): string {
+export function resolveDefaultWhatsAppAccountId(cfg: MoltbotConfig): string {
   const ids = listWhatsAppAccountIds(cfg);
   if (ids.includes(DEFAULT_ACCOUNT_ID)) return DEFAULT_ACCOUNT_ID;
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
 }
 
 function resolveAccountConfig(
-  cfg: ClawdbotConfig,
+  cfg: MoltbotConfig,
   accountId: string,
 ): WhatsAppAccountConfig | undefined {
   const accounts = cfg.channels?.whatsapp?.accounts;
@@ -75,10 +102,10 @@ function legacyAuthExists(authDir: string): boolean {
   }
 }
 
-export function resolveWhatsAppAuthDir(params: {
-  cfg: ClawdbotConfig;
-  accountId: string;
-}): { authDir: string; isLegacy: boolean } {
+export function resolveWhatsAppAuthDir(params: { cfg: MoltbotConfig; accountId: string }): {
+  authDir: string;
+  isLegacy: boolean;
+} {
   const accountId = params.accountId.trim() || DEFAULT_ACCOUNT_ID;
   const account = resolveAccountConfig(params.cfg, accountId);
   const configured = account?.authDir?.trim();
@@ -98,11 +125,11 @@ export function resolveWhatsAppAuthDir(params: {
 }
 
 export function resolveWhatsAppAccount(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   accountId?: string | null;
 }): ResolvedWhatsAppAccount {
-  const accountId =
-    params.accountId?.trim() || resolveDefaultWhatsAppAccountId(params.cfg);
+  const rootCfg = params.cfg.channels?.whatsapp;
+  const accountId = params.accountId?.trim() || resolveDefaultWhatsAppAccountId(params.cfg);
   const accountCfg = resolveAccountConfig(params.cfg, accountId);
   const enabled = accountCfg?.enabled !== false;
   const { authDir, isLegacy } = resolveWhatsAppAuthDir({
@@ -113,39 +140,27 @@ export function resolveWhatsAppAccount(params: {
     accountId,
     name: accountCfg?.name?.trim() || undefined,
     enabled,
+    sendReadReceipts: accountCfg?.sendReadReceipts ?? rootCfg?.sendReadReceipts ?? true,
     messagePrefix:
-      accountCfg?.messagePrefix ??
-      params.cfg.channels?.whatsapp?.messagePrefix ??
-      params.cfg.messages?.messagePrefix,
+      accountCfg?.messagePrefix ?? rootCfg?.messagePrefix ?? params.cfg.messages?.messagePrefix,
     authDir,
     isLegacyAuthDir: isLegacy,
-    selfChatMode:
-      accountCfg?.selfChatMode ?? params.cfg.channels?.whatsapp?.selfChatMode,
-    dmPolicy: accountCfg?.dmPolicy ?? params.cfg.channels?.whatsapp?.dmPolicy,
-    allowFrom:
-      accountCfg?.allowFrom ?? params.cfg.channels?.whatsapp?.allowFrom,
-    groupAllowFrom:
-      accountCfg?.groupAllowFrom ??
-      params.cfg.channels?.whatsapp?.groupAllowFrom,
-    groupPolicy:
-      accountCfg?.groupPolicy ?? params.cfg.channels?.whatsapp?.groupPolicy,
-    textChunkLimit:
-      accountCfg?.textChunkLimit ??
-      params.cfg.channels?.whatsapp?.textChunkLimit,
-    mediaMaxMb:
-      accountCfg?.mediaMaxMb ?? params.cfg.channels?.whatsapp?.mediaMaxMb,
-    blockStreaming:
-      accountCfg?.blockStreaming ??
-      params.cfg.channels?.whatsapp?.blockStreaming,
-    ackReaction:
-      accountCfg?.ackReaction ?? params.cfg.channels?.whatsapp?.ackReaction,
-    groups: accountCfg?.groups ?? params.cfg.channels?.whatsapp?.groups,
+    selfChatMode: accountCfg?.selfChatMode ?? rootCfg?.selfChatMode,
+    dmPolicy: accountCfg?.dmPolicy ?? rootCfg?.dmPolicy,
+    allowFrom: accountCfg?.allowFrom ?? rootCfg?.allowFrom,
+    groupAllowFrom: accountCfg?.groupAllowFrom ?? rootCfg?.groupAllowFrom,
+    groupPolicy: accountCfg?.groupPolicy ?? rootCfg?.groupPolicy,
+    textChunkLimit: accountCfg?.textChunkLimit ?? rootCfg?.textChunkLimit,
+    chunkMode: accountCfg?.chunkMode ?? rootCfg?.chunkMode,
+    mediaMaxMb: accountCfg?.mediaMaxMb ?? rootCfg?.mediaMaxMb,
+    blockStreaming: accountCfg?.blockStreaming ?? rootCfg?.blockStreaming,
+    ackReaction: accountCfg?.ackReaction ?? rootCfg?.ackReaction,
+    groups: accountCfg?.groups ?? rootCfg?.groups,
+    debounceMs: accountCfg?.debounceMs ?? rootCfg?.debounceMs,
   };
 }
 
-export function listEnabledWhatsAppAccounts(
-  cfg: ClawdbotConfig,
-): ResolvedWhatsAppAccount[] {
+export function listEnabledWhatsAppAccounts(cfg: MoltbotConfig): ResolvedWhatsAppAccount[] {
   return listWhatsAppAccountIds(cfg)
     .map((accountId) => resolveWhatsAppAccount({ cfg, accountId }))
     .filter((account) => account.enabled);

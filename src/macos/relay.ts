@@ -25,18 +25,12 @@ async function main() {
   const args = process.argv.slice(2);
 
   // Swift side expects `--version` to return a plain semver string.
-  if (
-    hasFlag(args, "--version") ||
-    hasFlag(args, "-V") ||
-    hasFlag(args, "-v")
-  ) {
+  if (hasFlag(args, "--version") || hasFlag(args, "-V") || hasFlag(args, "-v")) {
     console.log(BUNDLED_VERSION);
     process.exit(0);
   }
 
-  const { parseRelaySmokeTest, runRelaySmokeTest } = await import(
-    "./relay-smoke.js"
-  );
+  const { parseRelaySmokeTest, runRelaySmokeTest } = await import("./relay-smoke.js");
   const smokeTest = parseRelaySmokeTest(args, process.env);
   if (smokeTest) {
     try {
@@ -53,17 +47,16 @@ async function main() {
   const { loadDotEnv } = await import("../infra/dotenv.js");
   loadDotEnv({ quiet: true });
 
-  const { ensureClawdbotCliOnPath } = await import("../infra/path-env.js");
-  ensureClawdbotCliOnPath();
+  const { ensureMoltbotCliOnPath } = await import("../infra/path-env.js");
+  ensureMoltbotCliOnPath();
 
   const { enableConsoleCapture } = await import("../logging.js");
   enableConsoleCapture();
 
   const { assertSupportedRuntime } = await import("../infra/runtime-guard.js");
   assertSupportedRuntime();
-  const { installUnhandledRejectionHandler } = await import(
-    "../infra/unhandled-rejections.js"
-  );
+  const { formatUncaughtError } = await import("../infra/errors.js");
+  const { installUnhandledRejectionHandler } = await import("../infra/unhandled-rejections.js");
 
   const { buildProgram } = await import("../cli/program.js");
   const program = buildProgram();
@@ -71,14 +64,14 @@ async function main() {
   installUnhandledRejectionHandler();
 
   process.on("uncaughtException", (error) => {
-    console.error(
-      "[clawdbot] Uncaught exception:",
-      error.stack ?? error.message,
-    );
+    console.error("[moltbot] Uncaught exception:", formatUncaughtError(error));
     process.exit(1);
   });
 
   await program.parseAsync(process.argv);
 }
 
-void main();
+void main().catch((err) => {
+  console.error("[moltbot] Relay failed:", err instanceof Error ? (err.stack ?? err.message) : err);
+  process.exit(1);
+});

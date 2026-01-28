@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import {
   applyAgentBindings,
   applyAgentConfig,
@@ -13,7 +13,7 @@ import {
 
 describe("agents helpers", () => {
   it("buildAgentSummaries includes default + configured agents", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         defaults: {
           workspace: "/main-ws",
@@ -48,9 +48,7 @@ describe("agents helpers", () => {
     expect(main?.workspace).toBe(path.join(os.homedir(), "clawd-main"));
     expect(main?.bindings).toBe(1);
     expect(main?.model).toBe("anthropic/claude");
-    expect(main?.agentDir.endsWith(path.join("agents", "main", "agent"))).toBe(
-      true,
-    );
+    expect(main?.agentDir.endsWith(path.join("agents", "main", "agent"))).toBe(true);
 
     expect(work).toBeTruthy();
     expect(work?.name).toBe("Work");
@@ -61,7 +59,7 @@ describe("agents helpers", () => {
   });
 
   it("applyAgentConfig merges updates", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         list: [{ id: "work", workspace: "/old-ws", model: "anthropic/claude" }],
       },
@@ -82,7 +80,7 @@ describe("agents helpers", () => {
   });
 
   it("applyAgentBindings skips duplicates and reports conflicts", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       bindings: [
         {
           agentId: "main",
@@ -113,7 +111,7 @@ describe("agents helpers", () => {
   });
 
   it("pruneAgentConfig removes agent, bindings, and allowlist entries", () => {
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         list: [
           { id: "work", default: true, workspace: "/work-ws" },
@@ -130,12 +128,8 @@ describe("agents helpers", () => {
     };
 
     const result = pruneAgentConfig(cfg, "work");
-    expect(
-      result.config.agents?.list?.some((agent) => agent.id === "work"),
-    ).toBe(false);
-    expect(
-      result.config.agents?.list?.some((agent) => agent.id === "home"),
-    ).toBe(true);
+    expect(result.config.agents?.list?.some((agent) => agent.id === "work")).toBe(false);
+    expect(result.config.agents?.list?.some((agent) => agent.id === "home")).toBe(true);
     expect(result.config.bindings).toHaveLength(1);
     expect(result.config.bindings?.[0]?.agentId).toBe("home");
     expect(result.config.tools?.agentToAgent?.allow).toEqual(["home"]);

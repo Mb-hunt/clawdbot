@@ -17,6 +17,16 @@ An **agent** is a fully scoped brain with its own:
 - **State directory** (`agentDir`) for auth profiles, model registry, and per-agent config.
 - **Session store** (chat history + routing state) under `~/.clawdbot/agents/<agentId>/sessions`.
 
+Auth profiles are **per-agent**. Each agent reads from its own:
+
+```
+~/.clawdbot/agents/<agentId>/agent/auth-profiles.json
+```
+
+Main agent credentials are **not** shared automatically. Never reuse `agentDir`
+across agents (it causes auth/session collisions). If you want to share creds,
+copy `auth-profiles.json` into the other agent's `agentDir`.
+
 Skills are per-agent via each workspace’s `skills/` folder, with shared skills
 available from `~/.clawdbot/skills`. See [Skills: per-agent vs shared](/tools/skills#per-agent-vs-shared-skills).
 
@@ -29,7 +39,7 @@ reach other host locations unless sandboxing is enabled. See
 
 ## Paths (quick map)
 
-- Config: `~/.clawdbot/clawdbot.json` (or `CLAWDBOT_CONFIG_PATH`)
+- Config: `~/.clawdbot/moltbot.json` (or `CLAWDBOT_CONFIG_PATH`)
 - State dir: `~/.clawdbot` (or `CLAWDBOT_STATE_DIR`)
 - Workspace: `~/clawd` (or `~/clawd-<agentId>`)
 - Agent dir: `~/.clawdbot/agents/<agentId>/agent` (or `agents.list[].agentDir`)
@@ -37,7 +47,7 @@ reach other host locations unless sandboxing is enabled. See
 
 ### Single-agent mode (default)
 
-If you do nothing, Clawdbot runs a single agent:
+If you do nothing, Moltbot runs a single agent:
 
 - `agentId` defaults to **`main`**.
 - Sessions are keyed as `agent:main:<mainKey>`.
@@ -49,7 +59,7 @@ If you do nothing, Clawdbot runs a single agent:
 Use the agent wizard to add a new isolated agent:
 
 ```bash
-clawdbot agents add work
+moltbot agents add work
 ```
 
 Then add `bindings` (or let the wizard do it) to route inbound messages.
@@ -57,7 +67,7 @@ Then add `bindings` (or let the wizard do it) to route inbound messages.
 Verify with:
 
 ```bash
-clawdbot agents list --bindings
+moltbot agents list --bindings
 ```
 
 ## Multiple agents = multiple people, multiple personalities
@@ -129,7 +139,7 @@ multiple phone numbers without mixing sessions.
 
 ## Example: two WhatsApps → two agents
 
-`~/.clawdbot/clawdbot.json` (JSON5):
+`~/.clawdbot/moltbot.json` (JSON5):
 
 ```js
 {
@@ -246,6 +256,52 @@ Keep WhatsApp on the fast agent, but route one DM to Opus:
 
 Peer bindings always win, so keep them above the channel-wide rule.
 
+## Family agent bound to a WhatsApp group
+
+Bind a dedicated family agent to a single WhatsApp group, with mention gating
+and a tighter tool policy:
+
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "family",
+        name: "Family",
+        workspace: "~/clawd-family",
+        identity: { name: "Family Bot" },
+        groupChat: {
+          mentionPatterns: ["@family", "@familybot", "@Family Bot"]
+        },
+        sandbox: {
+          mode: "all",
+          scope: "agent"
+        },
+        tools: {
+          allow: ["exec", "read", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"],
+          deny: ["write", "edit", "apply_patch", "browser", "canvas", "nodes", "cron"]
+        }
+      }
+    ]
+  },
+  bindings: [
+    {
+      agentId: "family",
+      match: {
+        channel: "whatsapp",
+        peer: { kind: "group", id: "120363999999999999@g.us" }
+      }
+    }
+  ]
+}
+```
+
+Notes:
+- Tool allow/deny lists are **tools**, not skills. If a skill needs to run a
+  binary, ensure `exec` is allowed and the binary exists in the sandbox.
+- For stricter gating, set `agents.list[].groupChat.mentionPatterns` and keep
+  group allowlists enabled for the channel.
+
 ## Per-Agent Sandbox and Tool Configuration
 
 Starting with v2026.1.6, each agent can have its own sandbox and tool restrictions:
@@ -282,6 +338,9 @@ Starting with v2026.1.6, each agent can have its own sandbox and tool restrictio
   },
 }
 ```
+
+Note: `setupCommand` lives under `sandbox.docker` and runs once on container creation.
+Per-agent `sandbox.docker.*` overrides are ignored when the resolved scope is `"shared"`.
 
 **Benefits:**
 - **Security isolation**: Restrict tools for untrusted agents

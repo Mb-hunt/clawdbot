@@ -143,7 +143,7 @@ export class CallManager {
       // For notify mode with a message, use inline TwiML with <Say>
       let inlineTwiml: string | undefined;
       if (mode === "notify" && initialMessage) {
-        const pollyVoice = mapVoiceToPolly(this.config.tts.voice);
+        const pollyVoice = mapVoiceToPolly(this.config.tts?.openai?.voice);
         inlineTwiml = this.generateNotifyTwiml(initialMessage, pollyVoice);
         console.log(
           `[voice-call] Using inline TwiML for notify mode (voice: ${pollyVoice})`,
@@ -210,11 +210,13 @@ export class CallManager {
       this.addTranscriptEntry(call, "bot", text);
 
       // Play TTS
+      const voice =
+        this.provider?.name === "twilio" ? this.config.tts?.openai?.voice : undefined;
       await this.provider.playTts({
         callId,
         providerCallId: call.providerCallId,
         text,
-        voice: this.config.tts.voice,
+        voice,
       });
 
       return { success: true };
@@ -580,8 +582,16 @@ export class CallManager {
     }
 
     // Update provider call ID if we got it
-    if (event.providerCallId && !call.providerCallId) {
+    if (event.providerCallId && event.providerCallId !== call.providerCallId) {
+      const previousProviderCallId = call.providerCallId;
       call.providerCallId = event.providerCallId;
+      this.providerCallIdMap.set(event.providerCallId, call.callId);
+      if (previousProviderCallId) {
+        const mapped = this.providerCallIdMap.get(previousProviderCallId);
+        if (mapped === call.callId) {
+          this.providerCallIdMap.delete(previousProviderCallId);
+        }
+      }
     }
 
     // Track processed event
@@ -602,6 +612,9 @@ export class CallManager {
         this.transitionState(call, "answered");
         // Start max duration timer when call is answered
         this.startMaxDurationTimer(call.callId);
+        // Best-effort: speak initial message (for inbound greetings and outbound
+        // conversation mode) once the call is answered.
+        this.maybeSpeakInitialMessageOnAnswered(call);
         break;
 
       case "call.active":
@@ -651,6 +664,23 @@ export class CallManager {
     }
 
     this.persistCallRecord(call);
+  }
+
+  private maybeSpeakInitialMessageOnAnswered(call: CallRecord): void {
+    const initialMessage =
+      typeof call.metadata?.initialMessage === "string"
+        ? call.metadata.initialMessage.trim()
+        : "";
+
+    if (!initialMessage) return;
+
+    if (!this.provider || !call.providerCallId) return;
+
+    // Twilio has provider-specific state for speaking (<Say> fallback) and can
+    // fail for inbound calls; keep existing Twilio behavior unchanged.
+    if (this.provider.name === "twilio") return;
+
+    void this.speakInitialMessage(call.providerCallId);
   }
 
   /**

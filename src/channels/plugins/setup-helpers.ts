@@ -1,22 +1,19 @@
-import type { ClawdbotConfig } from "../../config/config.js";
-import {
-  DEFAULT_ACCOUNT_ID,
-  normalizeAccountId,
-} from "../../routing/session-key.js";
+import type { MoltbotConfig } from "../../config/config.js";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
 
 type ChannelSectionBase = {
   name?: string;
   accounts?: Record<string, Record<string, unknown>>;
 };
 
-function channelHasAccounts(cfg: ClawdbotConfig, channelKey: string): boolean {
+function channelHasAccounts(cfg: MoltbotConfig, channelKey: string): boolean {
   const channels = cfg.channels as Record<string, unknown> | undefined;
   const base = channels?.[channelKey] as ChannelSectionBase | undefined;
   return Boolean(base?.accounts && Object.keys(base.accounts).length > 0);
 }
 
 function shouldStoreNameInAccounts(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   channelKey: string;
   accountId: string;
   alwaysUseAccounts?: boolean;
@@ -27,21 +24,19 @@ function shouldStoreNameInAccounts(params: {
 }
 
 export function applyAccountNameToChannelSection(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   channelKey: string;
   accountId: string;
   name?: string;
   alwaysUseAccounts?: boolean;
-}): ClawdbotConfig {
+}): MoltbotConfig {
   const trimmed = params.name?.trim();
   if (!trimmed) return params.cfg;
   const accountId = normalizeAccountId(params.accountId);
   const channels = params.cfg.channels as Record<string, unknown> | undefined;
   const baseConfig = channels?.[params.channelKey];
   const base =
-    typeof baseConfig === "object" && baseConfig
-      ? (baseConfig as ChannelSectionBase)
-      : undefined;
+    typeof baseConfig === "object" && baseConfig ? (baseConfig as ChannelSectionBase) : undefined;
   const useAccounts = shouldStoreNameInAccounts({
     cfg: params.cfg,
     channelKey: params.channelKey,
@@ -59,12 +54,9 @@ export function applyAccountNameToChannelSection(params: {
           name: trimmed,
         },
       },
-    } as ClawdbotConfig;
+    } as MoltbotConfig;
   }
-  const baseAccounts: Record<
-    string,
-    Record<string, unknown>
-  > = base?.accounts ?? {};
+  const baseAccounts: Record<string, Record<string, unknown>> = base?.accounts ?? {};
   const existingAccount = baseAccounts[accountId] ?? {};
   const baseWithoutName =
     accountId === DEFAULT_ACCOUNT_ID
@@ -85,14 +77,14 @@ export function applyAccountNameToChannelSection(params: {
         },
       },
     },
-  } as ClawdbotConfig;
+  } as MoltbotConfig;
 }
 
 export function migrateBaseNameToDefaultAccount(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   channelKey: string;
   alwaysUseAccounts?: boolean;
-}): ClawdbotConfig {
+}): MoltbotConfig {
   if (params.alwaysUseAccounts) return params.cfg;
   const channels = params.cfg.channels as Record<string, unknown> | undefined;
   const base = channels?.[params.channelKey] as ChannelSectionBase | undefined;
@@ -115,5 +107,5 @@ export function migrateBaseNameToDefaultAccount(params: {
         accounts,
       },
     },
-  } as ClawdbotConfig;
+  } as MoltbotConfig;
 }

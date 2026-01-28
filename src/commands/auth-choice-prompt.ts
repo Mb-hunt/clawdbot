@@ -9,8 +9,6 @@ export async function promptAuthChoiceGrouped(params: {
   prompter: WizardPrompter;
   store: AuthProfileStore;
   includeSkip: boolean;
-  includeClaudeCliIfMissing?: boolean;
-  platform?: NodeJS.Platform;
 }): Promise<AuthChoice> {
   const { groups, skipOption } = buildAuthChoiceGroups(params);
   const availableGroups = groups.filter((group) => group.options.length > 0);
@@ -34,9 +32,7 @@ export async function promptAuthChoiceGrouped(params: {
       return "skip";
     }
 
-    const group = availableGroups.find(
-      (candidate) => candidate.value === providerSelection,
-    );
+    const group = availableGroups.find((candidate) => candidate.value === providerSelection);
 
     if (!group || group.options.length === 0) {
       await params.prompter.note(

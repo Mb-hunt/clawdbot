@@ -1,9 +1,9 @@
 ---
-summary: "Schema-accurate configuration examples for common Clawdbot setups"
+summary: "Schema-accurate configuration examples for common Moltbot setups"
 read_when:
-  - Learning how to configure Clawdbot
+  - Learning how to configure Moltbot
   - Looking for configuration examples
-  - Setting up Clawdbot for the first time
+  - Setting up Moltbot for the first time
 ---
 # Configuration Examples
 
@@ -19,7 +19,7 @@ Examples below are aligned with the current config schema. For the exhaustive re
 }
 ```
 
-Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
+Save to `~/.clawdbot/moltbot.json` and you can DM the bot from that number.
 
 ### Recommended starter
 ```json5
@@ -85,7 +85,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
   // Logging
   logging: {
     level: "info",
-    file: "/tmp/clawdbot/clawdbot.log",
+    file: "/tmp/moltbot/moltbot.log",
     consoleLevel: "info",
     consoleStyle: "pretty",
     redactSensitive: "tools"
@@ -93,7 +93,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
 
   // Message formatting
   messages: {
-    messagePrefix: "[clawdbot]",
+    messagePrefix: "[moltbot]",
     responsePrefix: ">",
     ackReaction: "👀",
     ackReactionScope: "group-mentions"
@@ -102,7 +102,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
   // Routing + queue
   routing: {
     groupChat: {
-      mentionPatterns: ["@clawd", "clawdbot"],
+      mentionPatterns: ["@clawd", "moltbot"],
       historyLimit: 50
     },
     queue: {
@@ -124,10 +124,21 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
 
   // Tooling
   tools: {
-    audio: {
-      transcription: {
-        args: ["--model", "base", "{{MediaPath}}"],
+    media: {
+      audio: {
+        enabled: true,
+        maxBytes: 20971520,
+        models: [
+          { provider: "openai", model: "gpt-4o-mini-transcribe" },
+          // Optional CLI fallback (Whisper binary):
+          // { type: "cli", command: "whisper", args: ["--model", "base", "{{MediaPath}}"] }
+        ],
         timeoutSeconds: 120
+      },
+      video: {
+        enabled: true,
+        maxBytes: 52428800,
+        models: [{ provider: "google", model: "gemini-3-flash-preview" }]
       }
     }
   },
@@ -135,8 +146,14 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
   // Session behavior
   session: {
     scope: "per-sender",
-    idleMinutes: 60,
-    heartbeatIdleMinutes: 120,
+    reset: {
+      mode: "daily",
+      atHour: 4,
+      idleMinutes: 60
+    },
+    resetByChannel: {
+      discord: { mode: "idle", idleMinutes: 10080 }
+    },
     resetTriggers: ["/new", "/reset"],
     store: "~/.clawdbot/agents/default/sessions/sessions.json",
     typingIntervalSeconds: 5,
@@ -246,10 +263,9 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
         ackMaxChars: 300
       },
       memorySearch: {
-        provider: "openai",
-        model: "text-embedding-004",
+        provider: "gemini",
+        model: "gemini-embedding-001",
         remote: {
-          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
           apiKey: "${GEMINI_API_KEY}"
         }
       },
@@ -258,7 +274,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
         perSession: true,
         workspaceRoot: "~/.clawdbot/sandboxes",
         docker: {
-          image: "clawdbot-sandbox:bookworm-slim",
+          image: "moltbot-sandbox:bookworm-slim",
           workdir: "/workspace",
           readOnlyRoot: true,
           tmpfs: ["/tmp", "/var/tmp", "/run"],
@@ -353,7 +369,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
       }
     ],
     gmail: {
-      account: "clawdbot@gmail.com",
+      account: "moltbot@gmail.com",
       label: "INBOX",
       topic: "projects/<project-id>/topics/gog-gmail-watch",
       subscription: "gog-gmail-watch-push",
@@ -372,7 +388,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
     mode: "local",
     port: 18789,
     bind: "loopback",
-    controlUi: { enabled: true, basePath: "/clawdbot" },
+    controlUi: { enabled: true, basePath: "/moltbot" },
     auth: {
       mode: "token",
       token: "gateway-token",
@@ -384,7 +400,7 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
   },
 
   skills: {
-    allowBundled: ["brave-search", "gemini"],
+    allowBundled: ["gemini", "peekaboo"],
     load: {
       extraDirs: ["~/Projects/agent-scripts/skills"]
     },
@@ -455,6 +471,44 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
 }
 ```
 
+### Anthropic subscription + API key, MiniMax fallback
+```json5
+{
+  auth: {
+    profiles: {
+      "anthropic:subscription": {
+        provider: "anthropic",
+        mode: "oauth",
+        email: "user@example.com"
+      },
+      "anthropic:api": {
+        provider: "anthropic",
+        mode: "api_key"
+      }
+    },
+    order: {
+      anthropic: ["anthropic:subscription", "anthropic:api"]
+    }
+  },
+  models: {
+    providers: {
+      minimax: {
+        baseUrl: "https://api.minimax.io/anthropic",
+        api: "anthropic-messages",
+        apiKey: "${MINIMAX_API_KEY}"
+      }
+    }
+  },
+  agent: {
+    workspace: "~/clawd",
+    model: {
+      primary: "anthropic/claude-opus-4-5",
+      fallbacks: ["minimax/MiniMax-M2.1"]
+    }
+  }
+}
+```
+
 ### Work bot (restricted access)
 ```json5
 {
@@ -514,5 +568,5 @@ Save to `~/.clawdbot/clawdbot.json` and you can DM the bot from that number.
 
 - If you set `dmPolicy: "open"`, the matching `allowFrom` list must include `"*"`.
 - Provider IDs differ (phone numbers, user IDs, channel IDs). Use the provider docs to confirm the format.
-- Optional sections to add later: `web`, `browser`, `ui`, `bridge`, `discovery`, `canvasHost`, `talk`, `signal`, `imessage`.
+- Optional sections to add later: `web`, `browser`, `ui`, `discovery`, `canvasHost`, `talk`, `signal`, `imessage`.
 - See [Providers](/channels/whatsapp) and [Troubleshooting](/gateway/troubleshooting) for deeper setup notes.

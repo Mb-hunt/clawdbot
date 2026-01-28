@@ -1,10 +1,10 @@
 import { resolveUserPath } from "../utils.js";
-import type { ClawdbotConfig } from "./types.js";
+import type { MoltbotConfig } from "./types.js";
 
 const PATH_VALUE_RE = /^~(?=$|[\\/])/;
 
 const PATH_KEY_RE = /(dir|path|paths|file|root|workspace)$/i;
-const PATH_LIST_KEYS = new Set(["paths"]);
+const PATH_LIST_KEYS = new Set(["paths", "pathPrepend"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -50,7 +50,7 @@ function normalizeAny(key: string | undefined, value: unknown): unknown {
  * Goal: accept `~/...` consistently across config file + env overrides, while
  * keeping the surface area small and predictable.
  */
-export function normalizeConfigPaths(cfg: ClawdbotConfig): ClawdbotConfig {
+export function normalizeConfigPaths(cfg: MoltbotConfig): MoltbotConfig {
   if (!cfg || typeof cfg !== "object") return cfg;
   normalizeAny(undefined, cfg);
   return cfg;

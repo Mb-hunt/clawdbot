@@ -1,26 +1,26 @@
 import fs from "node:fs";
 
 import { lookupContextTokens } from "../agents/context.js";
-import {
-  DEFAULT_CONTEXT_TOKENS,
-  DEFAULT_MODEL,
-  DEFAULT_PROVIDER,
-} from "../agents/defaults.js";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveModelAuthMode } from "../agents/model-auth.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
 import { resolveSandboxRuntimeStatus } from "../agents/sandbox.js";
-import {
-  derivePromptTokens,
-  normalizeUsage,
-  type UsageLike,
-} from "../agents/usage.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import { derivePromptTokens, normalizeUsage, type UsageLike } from "../agents/usage.js";
+import type { MoltbotConfig } from "../config/config.js";
 import {
   resolveMainSessionKey,
   resolveSessionFilePath,
   type SessionEntry,
   type SessionScope,
 } from "../config/sessions.js";
+import {
+  getTtsMaxLength,
+  getTtsProvider,
+  isSummarizationEnabled,
+  resolveTtsAutoMode,
+  resolveTtsConfig,
+  resolveTtsPrefsPath,
+} from "../tts/tts.js";
 import { resolveCommitHash } from "../infra/git-commit.js";
 import {
   estimateUsageCost,
@@ -32,17 +32,15 @@ import { VERSION } from "../version.js";
 import {
   listChatCommands,
   listChatCommandsForConfig,
+  type ChatCommandDefinition,
 } from "./commands-registry.js";
-import type {
-  ElevatedLevel,
-  ReasoningLevel,
-  ThinkLevel,
-  VerboseLevel,
-} from "./thinking.js";
+import { listPluginCommands } from "../plugins/commands.js";
+import type { SkillCommandSpec } from "../agents/skills.js";
+import type { CommandCategory } from "./commands-registry.types.js";
+import type { ElevatedLevel, ReasoningLevel, ThinkLevel, VerboseLevel } from "./thinking.js";
+import type { MediaUnderstandingDecision } from "../media-understanding/types.js";
 
-type AgentConfig = Partial<
-  NonNullable<NonNullable<ClawdbotConfig["agents"]>["defaults"]>
->;
+type AgentConfig = Partial<NonNullable<NonNullable<MoltbotConfig["agents"]>["defaults"]>>;
 
 export const formatTokenCount = formatTokenCountShared;
 
@@ -56,7 +54,7 @@ type QueueStatus = {
 };
 
 type StatusArgs = {
-  config?: ClawdbotConfig;
+  config?: MoltbotConfig;
   agent: AgentConfig;
   sessionEntry?: SessionEntry;
   sessionKey?: string;
@@ -68,15 +66,51 @@ type StatusArgs = {
   resolvedElevated?: ElevatedLevel;
   modelAuth?: string;
   usageLine?: string;
+  timeLine?: string;
   queue?: QueueStatus;
+  mediaDecisions?: MediaUnderstandingDecision[];
+  subagentsLine?: string;
   includeTranscriptUsage?: boolean;
   now?: number;
 };
 
-const formatTokens = (
-  total: number | null | undefined,
-  contextTokens: number | null,
-) => {
+function resolveRuntimeLabel(
+  args: Pick<StatusArgs, "config" | "agent" | "sessionKey" | "sessionScope">,
+): string {
+  const sessionKey = args.sessionKey?.trim();
+  if (args.config && sessionKey) {
+    const runtimeStatus = resolveSandboxRuntimeStatus({
+      cfg: args.config,
+      sessionKey,
+    });
+    const sandboxMode = runtimeStatus.mode ?? "off";
+    if (sandboxMode === "off") return "direct";
+    const runtime = runtimeStatus.sandboxed ? "docker" : sessionKey ? "direct" : "unknown";
+    return `${runtime}/${sandboxMode}`;
+  }
+
+  const sandboxMode = args.agent?.sandbox?.mode ?? "off";
+  if (sandboxMode === "off") return "direct";
+  const sandboxed = (() => {
+    if (!sessionKey) return false;
+    if (sandboxMode === "all") return true;
+    if (args.config) {
+      return resolveSandboxRuntimeStatus({
+        cfg: args.config,
+        sessionKey,
+      }).sandboxed;
+    }
+    const sessionScope = args.sessionScope ?? "per-sender";
+    const mainKey = resolveMainSessionKey({
+      session: { scope: sessionScope },
+    });
+    return sessionKey !== mainKey.trim();
+  })();
+  const runtime = sandboxed ? "docker" : sessionKey ? "direct" : "unknown";
+  return `${runtime}/${sandboxMode}`;
+}
+
+const formatTokens = (total: number | null | undefined, contextTokens: number | null) => {
   const ctx = contextTokens ?? null;
   if (total == null) {
     const ctxLabel = ctx ? formatTokenCount(ctx) : "?";
@@ -115,9 +149,7 @@ const formatQueueDetails = (queue?: QueueStatus) => {
   if (typeof queue.debounceMs === "number") {
     const ms = Math.max(0, Math.round(queue.debounceMs));
     const label =
-      ms >= 1000
-        ? `${ms % 1000 === 0 ? ms / 1000 : (ms / 1000).toFixed(1)}s`
-        : `${ms}ms`;
+      ms >= 1000 ? `${ms % 1000 === 0 ? ms / 1000 : (ms / 1000).toFixed(1)}s` : `${ms}ms`;
     detailParts.push(`debounce ${label}`);
   }
   if (typeof queue.cap === "number") detailParts.push(`cap ${queue.cap}`);
@@ -173,8 +205,7 @@ const readUsageFromSessionLog = (
     if (!lastUsage) return undefined;
     input = lastUsage.input ?? 0;
     output = lastUsage.output ?? 0;
-    promptTokens =
-      derivePromptTokens(lastUsage) ?? lastUsage.total ?? input + output;
+    promptTokens = derivePromptTokens(lastUsage) ?? lastUsage.total ?? input + output;
     const total = lastUsage.total ?? promptTokens + output;
     if (promptTokens === 0 && total === 0) return undefined;
     return { input, output, promptTokens, total, model };
@@ -186,9 +217,64 @@ const readUsageFromSessionLog = (
 const formatUsagePair = (input?: number | null, output?: number | null) => {
   if (input == null && output == null) return null;
   const inputLabel = typeof input === "number" ? formatTokenCount(input) : "?";
-  const outputLabel =
-    typeof output === "number" ? formatTokenCount(output) : "?";
+  const outputLabel = typeof output === "number" ? formatTokenCount(output) : "?";
   return `🧮 Tokens: ${inputLabel} in / ${outputLabel} out`;
+};
+
+const formatMediaUnderstandingLine = (decisions?: MediaUnderstandingDecision[]) => {
+  if (!decisions || decisions.length === 0) return null;
+  const parts = decisions
+    .map((decision) => {
+      const count = decision.attachments.length;
+      const countLabel = count > 1 ? ` x${count}` : "";
+      if (decision.outcome === "success") {
+        const chosen = decision.attachments.find((entry) => entry.chosen)?.chosen;
+        const provider = chosen?.provider?.trim();
+        const model = chosen?.model?.trim();
+        const modelLabel = provider ? (model ? `${provider}/${model}` : provider) : null;
+        return `${decision.capability}${countLabel} ok${modelLabel ? ` (${modelLabel})` : ""}`;
+      }
+      if (decision.outcome === "no-attachment") {
+        return `${decision.capability} none`;
+      }
+      if (decision.outcome === "disabled") {
+        return `${decision.capability} off`;
+      }
+      if (decision.outcome === "scope-deny") {
+        return `${decision.capability} denied`;
+      }
+      if (decision.outcome === "skipped") {
+        const reason = decision.attachments
+          .flatMap((entry) => entry.attempts.map((attempt) => attempt.reason).filter(Boolean))
+          .find(Boolean);
+        const shortReason = reason ? reason.split(":")[0]?.trim() : undefined;
+        return `${decision.capability} skipped${shortReason ? ` (${shortReason})` : ""}`;
+      }
+      return null;
+    })
+    .filter((part): part is string => part != null);
+  if (parts.length === 0) return null;
+  if (parts.every((part) => part.endsWith(" none"))) return null;
+  return `📎 Media: ${parts.join(" · ")}`;
+};
+
+const formatVoiceModeLine = (
+  config?: MoltbotConfig,
+  sessionEntry?: SessionEntry,
+): string | null => {
+  if (!config) return null;
+  const ttsConfig = resolveTtsConfig(config);
+  const prefsPath = resolveTtsPrefsPath(ttsConfig);
+  const autoMode = resolveTtsAutoMode({
+    config: ttsConfig,
+    prefsPath,
+    sessionAuto: sessionEntry?.ttsAuto,
+  });
+  if (autoMode === "off") return null;
+  const provider = getTtsProvider(ttsConfig, prefsPath);
+  const maxLength = getTtsMaxLength(prefsPath);
+  const summarize = isSummarizationEnabled(prefsPath) ? "on" : "off";
+  return `🔊 Voice: ${autoMode} · provider=${provider} · limit=${maxLength} · summary=${summarize}`;
 };
 
 export function buildStatusMessage(args: StatusArgs): string {
@@ -199,12 +285,11 @@ export function buildStatusMessage(args: StatusArgs): string {
       agents: {
         defaults: args.agent ?? {},
       },
-    } as ClawdbotConfig,
+    } as MoltbotConfig,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
   });
-  const provider =
-    entry?.providerOverride ?? resolved.provider ?? DEFAULT_PROVIDER;
+  const provider = entry?.providerOverride ?? resolved.provider ?? DEFAULT_PROVIDER;
   let model = entry?.modelOverride ?? resolved.model ?? DEFAULT_MODEL;
   let contextTokens =
     entry?.contextTokens ??
@@ -214,9 +299,7 @@ export function buildStatusMessage(args: StatusArgs): string {
 
   let inputTokens = entry?.inputTokens;
   let outputTokens = entry?.outputTokens;
-  let totalTokens =
-    entry?.totalTokens ??
-    (entry?.inputTokens ?? 0) + (entry?.outputTokens ?? 0);
+  let totalTokens = entry?.totalTokens ?? (entry?.inputTokens ?? 0) + (entry?.outputTokens ?? 0);
 
   // Prefer prompt-size tokens from the session transcript when it looks larger
   // (cached prompt tokens are often missing from agent meta/store).
@@ -237,8 +320,7 @@ export function buildStatusMessage(args: StatusArgs): string {
   }
 
   const thinkLevel = args.resolvedThink ?? args.agent?.thinkingDefault ?? "off";
-  const verboseLevel =
-    args.resolvedVerbose ?? args.agent?.verboseDefault ?? "off";
+  const verboseLevel = args.resolvedVerbose ?? args.agent?.verboseDefault ?? "off";
   const reasoningLevel = args.resolvedReasoning ?? "off";
   const elevatedLevel =
     args.resolvedElevated ??
@@ -246,47 +328,21 @@ export function buildStatusMessage(args: StatusArgs): string {
     args.agent?.elevatedDefault ??
     "on";
 
-  const runtime = (() => {
-    const sandboxMode = args.agent?.sandbox?.mode ?? "off";
-    if (sandboxMode === "off") return { label: "direct" };
-    const sessionKey = args.sessionKey?.trim();
-    const sandboxed = (() => {
-      if (!sessionKey) return false;
-      if (sandboxMode === "all") return true;
-      if (args.config) {
-        return resolveSandboxRuntimeStatus({
-          cfg: args.config,
-          sessionKey,
-        }).sandboxed;
-      }
-      const sessionScope = args.sessionScope ?? "per-sender";
-      const mainKey = resolveMainSessionKey({
-        session: { scope: sessionScope },
-      });
-      return sessionKey !== mainKey.trim();
-    })();
-    const runtime = sandboxed ? "docker" : sessionKey ? "direct" : "unknown";
-    return {
-      label: `${runtime}/${sandboxMode}`,
-    };
-  })();
+  const runtime = { label: resolveRuntimeLabel(args) };
 
   const updatedAt = entry?.updatedAt;
   const sessionLine = [
     `Session: ${args.sessionKey ?? "unknown"}`,
-    typeof updatedAt === "number"
-      ? `updated ${formatAge(now - updatedAt)}`
-      : "no activity",
+    typeof updatedAt === "number" ? `updated ${formatAge(now - updatedAt)}` : "no activity",
   ]
     .filter(Boolean)
     .join(" • ");
 
   const isGroupSession =
     entry?.chatType === "group" ||
-    entry?.chatType === "room" ||
+    entry?.chatType === "channel" ||
     Boolean(args.sessionKey?.includes(":group:")) ||
-    Boolean(args.sessionKey?.includes(":channel:")) ||
-    Boolean(args.sessionKey?.startsWith("group:"));
+    Boolean(args.sessionKey?.includes(":channel:"));
   const groupActivationValue = isGroupSession
     ? (args.groupActivation ?? entry?.groupActivation ?? "mention")
     : undefined;
@@ -300,8 +356,14 @@ export function buildStatusMessage(args: StatusArgs): string {
 
   const queueMode = args.queue?.mode ?? "unknown";
   const queueDetails = formatQueueDetails(args.queue);
-  const verboseLabel = verboseLevel === "on" ? "verbose" : null;
-  const elevatedLabel = elevatedLevel === "on" ? "elevated" : null;
+  const verboseLabel =
+    verboseLevel === "full" ? "verbose:full" : verboseLevel === "on" ? "verbose" : null;
+  const elevatedLabel =
+    elevatedLevel && elevatedLevel !== "off"
+      ? elevatedLevel === "on"
+        ? "elevated"
+        : `elevated:${elevatedLevel}`
+      : null;
   const optionParts = [
     `Runtime: ${runtime.label}`,
     `Think: ${thinkLevel}`,
@@ -318,8 +380,7 @@ export function buildStatusMessage(args: StatusArgs): string {
 
   const authMode = resolveModelAuthMode(provider, args.config);
   const authLabelValue =
-    args.modelAuth ??
-    (authMode && authMode !== "unknown" ? authMode : undefined);
+    args.modelAuth ?? (authMode && authMode !== "unknown" ? authMode : undefined);
   const showCost = authLabelValue === "api-key" || authLabelValue === "mixed";
   const costConfig = showCost
     ? resolveModelCostConfig({
@@ -328,8 +389,7 @@ export function buildStatusMessage(args: StatusArgs): string {
         config: args.config,
       })
     : undefined;
-  const hasUsage =
-    typeof inputTokens === "number" || typeof outputTokens === "number";
+  const hasUsage = typeof inputTokens === "number" || typeof outputTokens === "number";
   const cost =
     showCost && hasUsage
       ? estimateUsageCost({
@@ -346,70 +406,229 @@ export function buildStatusMessage(args: StatusArgs): string {
   const authLabel = authLabelValue ? ` · 🔑 ${authLabelValue}` : "";
   const modelLine = `🧠 Model: ${modelLabel}${authLabel}`;
   const commit = resolveCommitHash();
-  const versionLine = `🦞 Clawdbot ${VERSION}${commit ? ` (${commit})` : ""}`;
+  const versionLine = `🦞 Moltbot ${VERSION}${commit ? ` (${commit})` : ""}`;
   const usagePair = formatUsagePair(inputTokens, outputTokens);
   const costLine = costLabel ? `💵 Cost: ${costLabel}` : null;
   const usageCostLine =
-    usagePair && costLine
-      ? `${usagePair} · ${costLine}`
-      : (usagePair ?? costLine);
+    usagePair && costLine ? `${usagePair} · ${costLine}` : (usagePair ?? costLine);
+  const mediaLine = formatMediaUnderstandingLine(args.mediaDecisions);
+  const voiceLine = formatVoiceModeLine(args.config, args.sessionEntry);
 
   return [
     versionLine,
+    args.timeLine,
     modelLine,
     usageCostLine,
     `📚 ${contextLine}`,
+    mediaLine,
     args.usageLine,
     `🧵 ${sessionLine}`,
+    args.subagentsLine,
     `⚙️ ${optionsLine}`,
+    voiceLine,
     activationLine,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-export function buildHelpMessage(cfg?: ClawdbotConfig): string {
-  const options = [
-    "/think <level>",
-    "/verbose on|off",
-    "/reasoning on|off",
-    "/elevated on|off",
-    "/model <id>",
-    "/cost on|off",
-  ];
-  if (cfg?.commands?.config === true) options.push("/config show");
-  if (cfg?.commands?.debug === true) options.push("/debug show");
-  return [
-    "ℹ️ Help",
-    "Shortcuts: /new reset | /compact [instructions] | /restart relink (if enabled)",
-    `Options: ${options.join(" | ")}`,
-    "More: /commands for all slash commands",
-  ].join("\n");
+const CATEGORY_LABELS: Record<CommandCategory, string> = {
+  session: "Session",
+  options: "Options",
+  status: "Status",
+  management: "Management",
+  media: "Media",
+  tools: "Tools",
+  docks: "Docks",
+};
+
+const CATEGORY_ORDER: CommandCategory[] = [
+  "session",
+  "options",
+  "status",
+  "management",
+  "media",
+  "tools",
+  "docks",
+];
+
+function groupCommandsByCategory(
+  commands: ChatCommandDefinition[],
+): Map<CommandCategory, ChatCommandDefinition[]> {
+  const grouped = new Map<CommandCategory, ChatCommandDefinition[]>();
+  for (const category of CATEGORY_ORDER) {
+    grouped.set(category, []);
+  }
+  for (const command of commands) {
+    const category = command.category ?? "tools";
+    const list = grouped.get(category) ?? [];
+    list.push(command);
+    grouped.set(category, list);
+  }
+  return grouped;
 }
 
-export function buildCommandsMessage(cfg?: ClawdbotConfig): string {
-  const lines = ["ℹ️ Slash commands"];
-  const commands = cfg ? listChatCommandsForConfig(cfg) : listChatCommands();
-  for (const command of commands) {
-    const primary = command.nativeName
-      ? `/${command.nativeName}`
-      : command.textAliases[0]?.trim() || `/${command.key}`;
-    const seen = new Set<string>();
-    const aliases = command.textAliases
-      .map((alias) => alias.trim())
-      .filter(Boolean)
-      .filter((alias) => alias.toLowerCase() !== primary.toLowerCase())
-      .filter((alias) => {
-        const key = alias.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    const aliasLabel = aliases.length
-      ? ` (aliases: ${aliases.join(", ")})`
-      : "";
-    const scopeLabel = command.scope === "text" ? " (text-only)" : "";
-    lines.push(`${primary}${aliasLabel}${scopeLabel} - ${command.description}`);
-  }
+export function buildHelpMessage(cfg?: MoltbotConfig): string {
+  const lines = ["ℹ️ Help", ""];
+
+  lines.push("Session");
+  lines.push("  /new  |  /reset  |  /compact [instructions]  |  /stop");
+  lines.push("");
+
+  const optionParts = ["/think <level>", "/model <id>", "/verbose on|off"];
+  if (cfg?.commands?.config === true) optionParts.push("/config");
+  if (cfg?.commands?.debug === true) optionParts.push("/debug");
+  lines.push("Options");
+  lines.push(`  ${optionParts.join("  |  ")}`);
+  lines.push("");
+
+  lines.push("Status");
+  lines.push("  /status  |  /whoami  |  /context");
+  lines.push("");
+
+  lines.push("Skills");
+  lines.push("  /skill <name> [input]");
+
+  lines.push("");
+  lines.push("More: /commands for full list");
+
   return lines.join("\n");
+}
+
+const COMMANDS_PER_PAGE = 8;
+
+export type CommandsMessageOptions = {
+  page?: number;
+  surface?: string;
+};
+
+export type CommandsMessageResult = {
+  text: string;
+  totalPages: number;
+  currentPage: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+};
+
+function formatCommandEntry(command: ChatCommandDefinition): string {
+  const primary = command.nativeName
+    ? `/${command.nativeName}`
+    : command.textAliases[0]?.trim() || `/${command.key}`;
+  const seen = new Set<string>();
+  const aliases = command.textAliases
+    .map((alias) => alias.trim())
+    .filter(Boolean)
+    .filter((alias) => alias.toLowerCase() !== primary.toLowerCase())
+    .filter((alias) => {
+      const key = alias.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  const aliasLabel = aliases.length ? ` (${aliases.join(", ")})` : "";
+  const scopeLabel = command.scope === "text" ? " [text]" : "";
+  return `${primary}${aliasLabel}${scopeLabel} - ${command.description}`;
+}
+
+type CommandsListItem = {
+  label: string;
+  text: string;
+};
+
+function buildCommandItems(
+  commands: ChatCommandDefinition[],
+  pluginCommands: ReturnType<typeof listPluginCommands>,
+): CommandsListItem[] {
+  const grouped = groupCommandsByCategory(commands);
+  const items: CommandsListItem[] = [];
+
+  for (const category of CATEGORY_ORDER) {
+    const categoryCommands = grouped.get(category) ?? [];
+    if (categoryCommands.length === 0) continue;
+    const label = CATEGORY_LABELS[category];
+    for (const command of categoryCommands) {
+      items.push({ label, text: formatCommandEntry(command) });
+    }
+  }
+
+  for (const command of pluginCommands) {
+    const pluginLabel = command.pluginId ? ` (${command.pluginId})` : "";
+    items.push({
+      label: "Plugins",
+      text: `/${command.name}${pluginLabel} - ${command.description}`,
+    });
+  }
+
+  return items;
+}
+
+function formatCommandList(items: CommandsListItem[]): string {
+  const lines: string[] = [];
+  let currentLabel: string | null = null;
+
+  for (const item of items) {
+    if (item.label !== currentLabel) {
+      if (lines.length > 0) lines.push("");
+      lines.push(item.label);
+      currentLabel = item.label;
+    }
+    lines.push(`  ${item.text}`);
+  }
+
+  return lines.join("\n");
+}
+
+export function buildCommandsMessage(
+  cfg?: MoltbotConfig,
+  skillCommands?: SkillCommandSpec[],
+  options?: CommandsMessageOptions,
+): string {
+  const result = buildCommandsMessagePaginated(cfg, skillCommands, options);
+  return result.text;
+}
+
+export function buildCommandsMessagePaginated(
+  cfg?: MoltbotConfig,
+  skillCommands?: SkillCommandSpec[],
+  options?: CommandsMessageOptions,
+): CommandsMessageResult {
+  const page = Math.max(1, options?.page ?? 1);
+  const surface = options?.surface?.toLowerCase();
+  const isTelegram = surface === "telegram";
+
+  const commands = cfg
+    ? listChatCommandsForConfig(cfg, { skillCommands })
+    : listChatCommands({ skillCommands });
+  const pluginCommands = listPluginCommands();
+  const items = buildCommandItems(commands, pluginCommands);
+
+  if (!isTelegram) {
+    const lines = ["ℹ️ Slash commands", ""];
+    lines.push(formatCommandList(items));
+    return {
+      text: lines.join("\n").trim(),
+      totalPages: 1,
+      currentPage: 1,
+      hasNext: false,
+      hasPrev: false,
+    };
+  }
+
+  const totalCommands = items.length;
+  const totalPages = Math.max(1, Math.ceil(totalCommands / COMMANDS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * COMMANDS_PER_PAGE;
+  const endIndex = startIndex + COMMANDS_PER_PAGE;
+  const pageItems = items.slice(startIndex, endIndex);
+
+  const lines = [`ℹ️ Commands (${currentPage}/${totalPages})`, ""];
+  lines.push(formatCommandList(pageItems));
+
+  return {
+    text: lines.join("\n").trim(),
+    totalPages,
+    currentPage,
+    hasNext: currentPage < totalPages,
+    hasPrev: currentPage > 1,
+  };
 }

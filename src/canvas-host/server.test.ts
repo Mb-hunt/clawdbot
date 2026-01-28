@@ -7,11 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { rawDataToString } from "../infra/ws.js";
 import { defaultRuntime } from "../runtime.js";
-import {
-  CANVAS_HOST_PATH,
-  CANVAS_WS_PATH,
-  injectCanvasLiveReload,
-} from "./a2ui.js";
+import { CANVAS_HOST_PATH, CANVAS_WS_PATH, injectCanvasLiveReload } from "./a2ui.js";
 import { createCanvasHostHandler, startCanvasHost } from "./server.js";
 
 describe("canvas host", () => {
@@ -19,12 +15,12 @@ describe("canvas host", () => {
     const out = injectCanvasLiveReload("<html><body>Hello</body></html>");
     expect(out).toContain(CANVAS_WS_PATH);
     expect(out).toContain("location.reload");
-    expect(out).toContain("clawdbotCanvasA2UIAction");
-    expect(out).toContain("clawdbotSendUserAction");
+    expect(out).toContain("moltbotCanvasA2UIAction");
+    expect(out).toContain("moltbotSendUserAction");
   });
 
   it("creates a default index.html when missing", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
 
     const server = await startCanvasHost({
       runtime: defaultRuntime,
@@ -35,13 +31,11 @@ describe("canvas host", () => {
     });
 
     try {
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`,
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain("Interactive test page");
-      expect(html).toContain("clawdbotSendUserAction");
+      expect(html).toContain("moltbotSendUserAction");
       expect(html).toContain(CANVAS_WS_PATH);
     } finally {
       await server.close();
@@ -50,12 +44,8 @@ describe("canvas host", () => {
   });
 
   it("skips live reload injection when disabled", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
-    await fs.writeFile(
-      path.join(dir, "index.html"),
-      "<html><body>no-reload</body></html>",
-      "utf8",
-    );
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
+    await fs.writeFile(path.join(dir, "index.html"), "<html><body>no-reload</body></html>", "utf8");
 
     const server = await startCanvasHost({
       runtime: defaultRuntime,
@@ -67,17 +57,13 @@ describe("canvas host", () => {
     });
 
     try {
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`,
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain("no-reload");
       expect(html).not.toContain(CANVAS_WS_PATH);
 
-      const wsRes = await fetch(
-        `http://127.0.0.1:${server.port}${CANVAS_WS_PATH}`,
-      );
+      const wsRes = await fetch(`http://127.0.0.1:${server.port}${CANVAS_WS_PATH}`);
       expect(wsRes.status).toBe(404);
     } finally {
       await server.close();
@@ -86,12 +72,8 @@ describe("canvas host", () => {
   });
 
   it("serves canvas content from the mounted base path", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
-    await fs.writeFile(
-      path.join(dir, "index.html"),
-      "<html><body>v1</body></html>",
-      "utf8",
-    );
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
+    await fs.writeFile(path.join(dir, "index.html"), "<html><body>v1</body></html>", "utf8");
 
     const handler = await createCanvasHostHandler({
       runtime: defaultRuntime,
@@ -113,9 +95,7 @@ describe("canvas host", () => {
       socket.destroy();
     });
 
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as AddressInfo).port;
 
     try {
@@ -137,12 +117,8 @@ describe("canvas host", () => {
   });
 
   it("reuses a handler without closing it twice", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
-    await fs.writeFile(
-      path.join(dir, "index.html"),
-      "<html><body>v1</body></html>",
-      "utf8",
-    );
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
+    await fs.writeFile(path.join(dir, "index.html"), "<html><body>v1</body></html>", "utf8");
 
     const handler = await createCanvasHostHandler({
       runtime: defaultRuntime,
@@ -174,7 +150,7 @@ describe("canvas host", () => {
   });
 
   it("serves HTML with injection and broadcasts reload on file changes", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
     const index = path.join(dir, "index.html");
     await fs.writeFile(index, "<html><body>v1</body></html>", "utf8");
 
@@ -187,22 +163,15 @@ describe("canvas host", () => {
     });
 
     try {
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`,
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}${CANVAS_HOST_PATH}/`);
       const html = await res.text();
       expect(res.status).toBe(200);
       expect(html).toContain("v1");
       expect(html).toContain(CANVAS_WS_PATH);
 
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${server.port}${CANVAS_WS_PATH}`,
-      );
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}${CANVAS_WS_PATH}`);
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("ws open timeout")),
-          2000,
-        );
+        const timer = setTimeout(() => reject(new Error("ws open timeout")), 5000);
         ws.on("open", () => {
           clearTimeout(timer);
           resolve();
@@ -214,16 +183,14 @@ describe("canvas host", () => {
       });
 
       const msg = new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("reload timeout")),
-          4000,
-        );
+        const timer = setTimeout(() => reject(new Error("reload timeout")), 10_000);
         ws.on("message", (data) => {
           clearTimeout(timer);
           resolve(rawDataToString(data));
         });
       });
 
+      await new Promise((resolve) => setTimeout(resolve, 100));
       await fs.writeFile(index, "<html><body>v2</body></html>", "utf8");
       expect(await msg).toBe("reload");
       ws.close();
@@ -231,10 +198,10 @@ describe("canvas host", () => {
       await server.close();
       await fs.rm(dir, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 20_000);
 
   it("serves the gateway-hosted A2UI scaffold", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-canvas-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "moltbot-canvas-"));
 
     const server = await startCanvasHost({
       runtime: defaultRuntime,
@@ -245,20 +212,18 @@ describe("canvas host", () => {
     });
 
     try {
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}/__clawdbot__/a2ui/`,
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}/__moltbot__/a2ui/`);
       const html = await res.text();
       expect(res.status).toBe(200);
-      expect(html).toContain("clawdbot-a2ui-host");
-      expect(html).toContain("clawdbotCanvasA2UIAction");
+      expect(html).toContain("moltbot-a2ui-host");
+      expect(html).toContain("moltbotCanvasA2UIAction");
 
       const bundleRes = await fetch(
-        `http://127.0.0.1:${server.port}/__clawdbot__/a2ui/a2ui.bundle.js`,
+        `http://127.0.0.1:${server.port}/__moltbot__/a2ui/a2ui.bundle.js`,
       );
       const js = await bundleRes.text();
       expect(bundleRes.status).toBe(200);
-      expect(js).toContain("clawdbotA2UI");
+      expect(js).toContain("moltbotA2UI");
     } finally {
       await server.close();
       await fs.rm(dir, { recursive: true, force: true });

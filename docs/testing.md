@@ -8,7 +8,7 @@ read_when:
 
 # Testing
 
-Clawdbot has three Vitest suites (unit/integration, e2e, live) and a small set of Docker runners.
+Moltbot has three Vitest suites (unit/integration, e2e, live) and a small set of Docker runners.
 
 This doc is a “how we test” guide:
 - What each suite covers (and what it deliberately does *not* cover)
@@ -113,7 +113,7 @@ Live tests are split into two layers so we can isolate failures:
   - Separates “provider API is broken / key is invalid” from “gateway agent pipeline is broken”
   - Contains small, isolated regressions (example: OpenAI Responses/Codex Responses reasoning replay + tool-call flows)
 
-### Layer 2: Gateway + dev agent smoke (what “@clawdbot” actually does)
+### Layer 2: Gateway + dev agent smoke (what “@moltbot” actually does)
 
 - Test: `src/gateway/gateway-models.profiles.live.test.ts`
 - Goal:
@@ -150,14 +150,14 @@ Live tests are split into two layers so we can isolate failures:
 Tip: to see what you can test on your machine (and the exact `provider/model` ids), run:
 
 ```bash
-pnpm clawdbot models list
-pnpm clawdbot models list --json
+moltbot models list
+moltbot models list --json
 ```
 
 ## Live: Anthropic setup-token smoke
 
 - Test: `src/agents/anthropic.setup-token.live.test.ts`
-- Goal: verify Claude CLI setup-token (or a pasted setup-token profile) can complete an Anthropic prompt.
+- Goal: verify Claude Code CLI setup-token (or a pasted setup-token profile) can complete an Anthropic prompt.
 - Enable:
   - `pnpm test:live` (or `CLAWDBOT_LIVE_TEST=1` if invoking Vitest directly)
   - `CLAWDBOT_LIVE_SETUP_TOKEN=1`
@@ -170,11 +170,11 @@ pnpm clawdbot models list --json
 Setup example:
 
 ```bash
-clawdbot models auth paste-token --provider anthropic --profile-id anthropic:setup-token-test
+moltbot models auth paste-token --provider anthropic --profile-id anthropic:setup-token-test
 CLAWDBOT_LIVE_SETUP_TOKEN=1 CLAWDBOT_LIVE_SETUP_TOKEN_PROFILE=anthropic:setup-token-test pnpm test:live src/agents/anthropic.setup-token.live.test.ts
 ```
 
-## Live: CLI backend smoke (Claude CLI or other local CLIs)
+## Live: CLI backend smoke (Claude Code CLI or other local CLIs)
 
 - Test: `src/gateway/gateway-cli-backend.live.test.ts`
 - Goal: validate the Gateway + agent pipeline using a local CLI backend, without touching your default config.
@@ -195,7 +195,7 @@ CLAWDBOT_LIVE_SETUP_TOKEN=1 CLAWDBOT_LIVE_SETUP_TOKEN_PROFILE=anthropic:setup-to
   - `CLAWDBOT_LIVE_CLI_BACKEND_IMAGE_ARG="--image"` to pass image file paths as CLI args instead of prompt injection.
   - `CLAWDBOT_LIVE_CLI_BACKEND_IMAGE_MODE="repeat"` (or `"list"`) to control how image args are passed when `IMAGE_ARG` is set.
   - `CLAWDBOT_LIVE_CLI_BACKEND_RESUME_PROBE=1` to send a second turn and validate resume flow.
-  - `CLAWDBOT_LIVE_CLI_BACKEND_DISABLE_MCP_CONFIG=0` to keep Claude CLI MCP config enabled (default disables MCP config with a temporary empty file).
+- `CLAWDBOT_LIVE_CLI_BACKEND_DISABLE_MCP_CONFIG=0` to keep Claude Code CLI MCP config enabled (default disables MCP config with a temporary empty file).
 
 Example:
 
@@ -227,8 +227,8 @@ Notes:
 - `google-antigravity/...` uses the Antigravity OAuth bridge (Cloud Code Assist-style agent endpoint).
 - `google-gemini-cli/...` uses the local Gemini CLI on your machine (separate auth + tooling quirks).
 - Gemini API vs Gemini CLI:
-  - API: Clawdbot calls Google’s hosted Gemini API over HTTP (API key / profile auth); this is what most users mean by “Gemini”.
-  - CLI: Clawdbot shells out to a local `gemini` binary; it has its own auth and can behave differently (streaming/tool support/version skew).
+  - API: Moltbot calls Google’s hosted Gemini API over HTTP (API key / profile auth); this is what most users mean by “Gemini”.
+  - CLI: Moltbot shells out to a local `gemini` binary; it has its own auth and can behave differently (streaming/tool support/version skew).
 
 ## Live: model matrix (what we cover)
 
@@ -270,7 +270,7 @@ Include at least one image-capable model in `CLAWDBOT_LIVE_GATEWAY_MODELS` (Clau
 ### Aggregators / alternate gateways
 
 If you have keys enabled, we also support testing via:
-- OpenRouter: `openrouter/...` (hundreds of models; use `clawdbot models scan` to find tool+image capable candidates)
+- OpenRouter: `openrouter/...` (hundreds of models; use `moltbot models scan` to find tool+image capable candidates)
 - OpenCode Zen: `opencode/...` (auth via `OPENCODE_API_KEY` / `OPENCODE_ZEN_API_KEY`)
 
 More providers you can include in the live matrix (if you have creds/config):
@@ -283,12 +283,17 @@ Tip: don’t try to hardcode “all models” in docs. The authoritative list is
 
 Live tests discover credentials the same way the CLI does. Practical implications:
 - If the CLI works, live tests should find the same keys.
-- If a live test says “no creds”, debug the same way you’d debug `clawdbot models list` / model selection.
+- If a live test says “no creds”, debug the same way you’d debug `moltbot models list` / model selection.
 
 - Profile store: `~/.clawdbot/credentials/` (preferred; what “profile keys” means in the tests)
-- Config: `~/.clawdbot/clawdbot.json` (or `CLAWDBOT_CONFIG_PATH`)
+- Config: `~/.clawdbot/moltbot.json` (or `CLAWDBOT_CONFIG_PATH`)
 
 If you want to rely on env keys (e.g. exported in your `~/.profile`), run local tests after `source ~/.profile`, or use the Docker runners below (they can mount `~/.profile` into the container).
+
+## Deepgram live (audio transcription)
+
+- Test: `src/media-understanding/providers/deepgram/audio.live.test.ts`
+- Enable: `DEEPGRAM_API_KEY=... DEEPGRAM_LIVE_TEST=1 pnpm test:live src/media-understanding/providers/deepgram/audio.live.test.ts`
 
 ## Docker runners (optional “works in Linux” checks)
 
@@ -317,6 +322,22 @@ Run docs checks after doc edits: `pnpm docs:list`.
 These are “real pipeline” regressions without real providers:
 - Gateway tool calling (mock OpenAI, real gateway + agent loop): `src/gateway/gateway.tool-calling.mock-openai.test.ts`
 - Gateway wizard (WS `wizard.start`/`wizard.next`, writes config + auth enforced): `src/gateway/gateway.wizard.e2e.test.ts`
+
+## Agent reliability evals (skills)
+
+We already have a few CI-safe tests that behave like “agent reliability evals”:
+- Mock tool-calling through the real gateway + agent loop (`src/gateway/gateway.tool-calling.mock-openai.test.ts`).
+- End-to-end wizard flows that validate session wiring and config effects (`src/gateway/gateway.wizard.e2e.test.ts`).
+
+What’s still missing for skills (see [Skills](/tools/skills)):
+- **Decisioning:** when skills are listed in the prompt, does the agent pick the right skill (or avoid irrelevant ones)?
+- **Compliance:** does the agent read `SKILL.md` before use and follow required steps/args?
+- **Workflow contracts:** multi-turn scenarios that assert tool order, session history carryover, and sandbox boundaries.
+
+Future evals should stay deterministic first:
+- A scenario runner using mock providers to assert tool calls + order, skill file reads, and session wiring.
+- A small suite of skill-focused scenarios (use vs avoid, gating, prompt injection).
+- Optional live evals (opt-in, env-gated) only after the CI-safe suite is in place.
 
 ## Adding regressions (guidance)
 

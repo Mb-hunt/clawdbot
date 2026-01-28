@@ -1,5 +1,5 @@
 ---
-summary: "How Clawdbot sandboxing works: modes, scopes, workspace access, and images"
+summary: "How Moltbot sandboxing works: modes, scopes, workspace access, and images"
 title: Sandboxing
 read_when: "You want a dedicated explanation of sandboxing or need to tune agents.defaults.sandbox."
 status: active
@@ -7,7 +7,7 @@ status: active
 
 # Sandboxing
 
-Clawdbot can run **tools inside Docker containers** to reduce blast radius.
+Moltbot can run **tools inside Docker containers** to reduce blast radius.
 This is **optional** and controlled by configuration (`agents.defaults.sandbox` or
 `agents.list[].sandbox`). If sandboxing is off, tools run on the host.
 The Gateway stays on the host; tool execution runs in an isolated sandbox
@@ -52,7 +52,7 @@ Group/channel sessions use their own keys, so they count as non-main and will be
 
 Inbound media is copied into the active sandbox workspace (`media/inbound/*`).
 Skills note: the `read` tool is sandbox-rooted. With `workspaceAccess: "none"`,
-Clawdbot mirrors eligible skills into the sandbox workspace (`.../skills`) so
+Moltbot mirrors eligible skills into the sandbox workspace (`.../skills`) so
 they can be read. With `"rw"`, workspace skills are readable from
 `/workspace/skills`.
 
@@ -98,12 +98,17 @@ Security notes:
 - See [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) for how binds interact with tool policy and elevated exec.
 
 ## Images + setup
-Default image: `clawdbot-sandbox:bookworm-slim`
+Default image: `moltbot-sandbox:bookworm-slim`
 
 Build it once:
 ```bash
 scripts/sandbox-setup.sh
 ```
+
+Note: the default image does **not** include Node. If a skill needs Node (or
+other runtimes), either bake a custom image or install via
+`sandbox.docker.setupCommand` (requires network egress + writable root +
+root user).
 
 Sandboxed browser image:
 ```bash
@@ -116,14 +121,32 @@ Override with `agents.defaults.sandbox.docker.network`.
 Docker installs and the containerized gateway live here:
 [Docker](/install/docker)
 
+## setupCommand (one-time container setup)
+`setupCommand` runs **once** after the sandbox container is created (not on every run).
+It executes inside the container via `sh -lc`.
+
+Paths:
+- Global: `agents.defaults.sandbox.docker.setupCommand`
+- Per-agent: `agents.list[].sandbox.docker.setupCommand`
+
+
+Common pitfalls:
+- Default `docker.network` is `"none"` (no egress), so package installs will fail.
+- `readOnlyRoot: true` prevents writes; set `readOnlyRoot: false` or bake a custom image.
+- `user` must be root for package installs (omit `user` or set `user: "0:0"`).
+- Sandbox exec does **not** inherit host `process.env`. Use
+  `agents.defaults.sandbox.docker.env` (or a custom image) for skill API keys.
+
 ## Tool policy + escape hatches
 Tool allow/deny policies still apply before sandbox rules. If a tool is denied
 globally or per-agent, sandboxing doesn’t bring it back.
 
 `tools.elevated` is an explicit escape hatch that runs `exec` on the host.
+`/exec` directives only apply for authorized senders and persist per session; to hard-disable
+`exec`, use tool policy deny (see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated)).
 
 Debugging:
-- Use `clawdbot sandbox explain` to inspect effective sandbox mode, tool policy, and fix-it config keys.
+- Use `moltbot sandbox explain` to inspect effective sandbox mode, tool policy, and fix-it config keys.
 - See [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) for the “why is this blocked?” mental model.
 Keep it locked down.
 

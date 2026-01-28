@@ -1,9 +1,6 @@
-import {
-  getChannelPlugin,
-  normalizeChannelId,
-} from "../../channels/plugins/index.js";
+import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import type { ChannelId } from "../../channels/plugins/types.js";
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { MoltbotConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway, randomIdempotencyKey } from "../../gateway/call.js";
 import type { PollInput } from "../../polls.js";
@@ -20,6 +17,7 @@ import {
   type OutboundDeliveryResult,
   type OutboundSendDeps,
 } from "./deliver.js";
+import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
 import type { OutboundChannel } from "./targets.js";
 import { resolveOutboundTarget } from "./targets.js";
 
@@ -37,14 +35,22 @@ type MessageSendParams = {
   content: string;
   channel?: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   gifPlayback?: boolean;
   accountId?: string;
   dryRun?: boolean;
   bestEffort?: boolean;
   deps?: OutboundSendDeps;
-  cfg?: ClawdbotConfig;
+  cfg?: MoltbotConfig;
   gateway?: MessageGatewayOptions;
   idempotencyKey?: string;
+  mirror?: {
+    sessionKey: string;
+    agentId?: string;
+    text?: string;
+    mediaUrls?: string[];
+  };
+  abortSignal?: AbortSignal;
 };
 
 export type MessageSendResult = {
@@ -52,6 +58,7 @@ export type MessageSendResult = {
   to: string;
   via: "direct" | "gateway";
   mediaUrl: string | null;
+  mediaUrls?: string[];
   result?: OutboundDeliveryResult | { messageId: string };
   dryRun?: boolean;
 };
@@ -64,7 +71,7 @@ type MessagePollParams = {
   durationHours?: number;
   channel?: string;
   dryRun?: boolean;
-  cfg?: ClawdbotConfig;
+  cfg?: MoltbotConfig;
   gateway?: MessageGatewayOptions;
   idempotencyKey?: string;
 };
@@ -101,9 +108,7 @@ function resolveGatewayOptions(opts?: MessageGatewayOptions) {
   };
 }
 
-export async function sendMessage(
-  params: MessageSendParams,
-): Promise<MessageSendResult> {
+export async function sendMessage(params: MessageSendParams): Promise<MessageSendResult> {
   const cfg = params.cfg ?? loadConfig();
   const channel = params.channel?.trim()
     ? normalizeChannelId(params.channel)
@@ -116,13 +121,29 @@ export async function sendMessage(
     throw new Error(`Unknown channel: ${channel}`);
   }
   const deliveryMode = plugin.outbound?.deliveryMode ?? "direct";
+  const normalizedPayloads = normalizeReplyPayloadsForDelivery([
+    {
+      text: params.content,
+      mediaUrl: params.mediaUrl,
+      mediaUrls: params.mediaUrls,
+    },
+  ]);
+  const mirrorText = normalizedPayloads
+    .map((payload) => payload.text)
+    .filter(Boolean)
+    .join("\n");
+  const mirrorMediaUrls = normalizedPayloads.flatMap(
+    (payload) => payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []),
+  );
+  const primaryMediaUrl = mirrorMediaUrls[0] ?? params.mediaUrl ?? null;
 
   if (params.dryRun) {
     return {
       channel,
       to: params.to,
       via: deliveryMode === "gateway" ? "gateway" : "direct",
-      mediaUrl: params.mediaUrl ?? null,
+      mediaUrl: primaryMediaUrl,
+      mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
       dryRun: true,
     };
   }
@@ -143,17 +164,26 @@ export async function sendMessage(
       channel: outboundChannel,
       to: resolvedTarget.to,
       accountId: params.accountId,
-      payloads: [{ text: params.content, mediaUrl: params.mediaUrl }],
+      payloads: normalizedPayloads,
       gifPlayback: params.gifPlayback,
       deps: params.deps,
       bestEffort: params.bestEffort,
+      abortSignal: params.abortSignal,
+      mirror: params.mirror
+        ? {
+            ...params.mirror,
+            text: mirrorText || params.content,
+            mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
+          }
+        : undefined,
     });
 
     return {
       channel,
       to: params.to,
       via: "direct",
-      mediaUrl: params.mediaUrl ?? null,
+      mediaUrl: primaryMediaUrl,
+      mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
       result: results.at(-1),
     };
   }
@@ -167,9 +197,11 @@ export async function sendMessage(
       to: params.to,
       message: params.content,
       mediaUrl: params.mediaUrl,
+      mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
       gifPlayback: params.gifPlayback,
       accountId: params.accountId,
       channel,
+      sessionKey: params.mirror?.sessionKey,
       idempotencyKey: params.idempotencyKey ?? randomIdempotencyKey(),
     },
     timeoutMs: gateway.timeoutMs,
@@ -182,14 +214,13 @@ export async function sendMessage(
     channel,
     to: params.to,
     via: "gateway",
-    mediaUrl: params.mediaUrl ?? null,
+    mediaUrl: primaryMediaUrl,
+    mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
     result,
   };
 }
 
-export async function sendPoll(
-  params: MessagePollParams,
-): Promise<MessagePollResult> {
+export async function sendPoll(params: MessagePollParams): Promise<MessagePollResult> {
   const cfg = params.cfg ?? loadConfig();
   const channel = params.channel?.trim()
     ? normalizeChannelId(params.channel)

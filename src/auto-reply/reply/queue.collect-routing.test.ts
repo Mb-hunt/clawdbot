@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { MoltbotConfig } from "../../config/config.js";
 import type { FollowupRun, QueueSettings } from "./queue.js";
 import { enqueueFollowupRun, scheduleFollowupDrain } from "./queue.js";
 
@@ -26,7 +26,7 @@ function createRun(params: {
       sessionId: "sess",
       sessionFile: "/tmp/session.json",
       workspaceDir: "/tmp",
-      config: {} as ClawdbotConfig,
+      config: {} as MoltbotConfig,
       provider: "openai",
       model: "gpt-test",
       timeoutMs: 10_000,
@@ -91,9 +91,7 @@ describe("followup queue deduplication", () => {
     scheduleFollowupDrain(key, runFollowup);
     await expect.poll(() => calls.length).toBe(1);
     // Should collect both unique messages
-    expect(calls[0]?.prompt).toContain(
-      "[Queued messages while agent was busy]",
-    );
+    expect(calls[0]?.prompt).toContain("[Queued messages while agent was busy]");
   });
 
   it("deduplicates exact prompt when routing matches and no message id", async () => {
@@ -282,9 +280,7 @@ describe("followup queue collect routing", () => {
 
     scheduleFollowupDrain(key, runFollowup);
     await expect.poll(() => calls.length).toBe(1);
-    expect(calls[0]?.prompt).toContain(
-      "[Queued messages while agent was busy]",
-    );
+    expect(calls[0]?.prompt).toContain("[Queued messages while agent was busy]");
     expect(calls[0]?.originatingChannel).toBe("slack");
     expect(calls[0]?.originatingTo).toBe("channel:A");
   });

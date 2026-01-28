@@ -4,19 +4,11 @@ import {
   listChannelPlugins,
   normalizeChannelId,
 } from "../../channels/plugins/index.js";
-import { type ClawdbotConfig, writeConfigFile } from "../../config/config.js";
-import {
-  DEFAULT_ACCOUNT_ID,
-  normalizeAccountId,
-} from "../../routing/session-key.js";
+import { type MoltbotConfig, writeConfigFile } from "../../config/config.js";
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../../runtime.js";
 import { createClackPrompter } from "../../wizard/clack-prompter.js";
-import {
-  type ChatChannel,
-  channelLabel,
-  requireValidConfig,
-  shouldUseWizard,
-} from "./shared.js";
+import { type ChatChannel, channelLabel, requireValidConfig, shouldUseWizard } from "./shared.js";
 
 export type ChannelsRemoveOptions = {
   channel?: string;
@@ -24,7 +16,7 @@ export type ChannelsRemoveOptions = {
   delete?: boolean;
 };
 
-function listAccountIds(cfg: ClawdbotConfig, channel: ChatChannel): string[] {
+function listAccountIds(cfg: MoltbotConfig, channel: ChatChannel): string[] {
   const plugin = getChannelPlugin(channel);
   if (!plugin) return [];
   return plugin.config.listAccountIds(cfg);
@@ -102,8 +94,7 @@ export async function channelsRemoveCommand(
   }
 
   const resolvedAccountId =
-    normalizeAccountId(accountId) ??
-    resolveChannelDefaultAccountId({ plugin, cfg });
+    normalizeAccountId(accountId) ?? resolveChannelDefaultAccountId({ plugin, cfg });
   const accountKey = resolvedAccountId || DEFAULT_ACCOUNT_ID;
 
   let next = { ...cfg };

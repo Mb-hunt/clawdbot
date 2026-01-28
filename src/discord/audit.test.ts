@@ -27,7 +27,7 @@ describe("discord audit", () => {
           },
         },
       },
-    } as unknown as import("../config/config.js").ClawdbotConfig;
+    } as unknown as import("../config/config.js").MoltbotConfig;
 
     const collected = collectDiscordAuditChannelIds({
       cfg,
@@ -36,9 +36,7 @@ describe("discord audit", () => {
     expect(collected.channelIds).toEqual(["111"]);
     expect(collected.unresolvedChannels).toBe(1);
 
-    (
-      fetchChannelPermissionsDiscord as unknown as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce({
+    (fetchChannelPermissionsDiscord as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       channelId: "111",
       permissions: ["ViewChannel"],
       raw: "0",

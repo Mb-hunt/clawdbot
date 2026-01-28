@@ -1,19 +1,15 @@
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
 import { normalizeGoogleModelId } from "./models-config.providers.js";
+import { resolveAgentModelPrimary } from "./agent-scope.js";
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 
 export type ModelRef = {
   provider: string;
   model: string;
 };
 
-export type ThinkLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type ModelAliasIndex = {
   byAlias: Map<string, { alias: string; ref: ModelRef }>;
@@ -32,17 +28,16 @@ export function normalizeProviderId(provider: string): string {
   const normalized = provider.trim().toLowerCase();
   if (normalized === "z.ai" || normalized === "z-ai") return "zai";
   if (normalized === "opencode-zen") return "opencode";
+  if (normalized === "qwen") return "qwen-portal";
   return normalized;
 }
 
-export function isCliProvider(provider: string, cfg?: ClawdbotConfig): boolean {
+export function isCliProvider(provider: string, cfg?: MoltbotConfig): boolean {
   const normalized = normalizeProviderId(provider);
   if (normalized === "claude-cli") return true;
   if (normalized === "codex-cli") return true;
   const backends = cfg?.agents?.defaults?.cliBackends ?? {};
-  return Object.keys(backends).some(
-    (key) => normalizeProviderId(key) === normalized,
-  );
+  return Object.keys(backends).some((key) => normalizeProviderId(key) === normalized);
 }
 
 function normalizeAnthropicModelId(model: string): string {
@@ -60,10 +55,7 @@ function normalizeProviderModelId(provider: string, model: string): string {
   return model;
 }
 
-export function parseModelRef(
-  raw: string,
-  defaultProvider: string,
-): ModelRef | null {
+export function parseModelRef(raw: string, defaultProvider: string): ModelRef | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   const slash = trimmed.indexOf("/");
@@ -81,7 +73,7 @@ export function parseModelRef(
 }
 
 export function buildModelAliasIndex(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   defaultProvider: string;
 }): ModelAliasIndex {
   const byAlias = new Map<string, { alias: string; ref: ModelRef }>();
@@ -91,9 +83,7 @@ export function buildModelAliasIndex(params: {
   for (const [keyRaw, entryRaw] of Object.entries(rawModels)) {
     const parsed = parseModelRef(String(keyRaw ?? ""), params.defaultProvider);
     if (!parsed) continue;
-    const alias = String(
-      (entryRaw as { alias?: string } | undefined)?.alias ?? "",
-    ).trim();
+    const alias = String((entryRaw as { alias?: string } | undefined)?.alias ?? "").trim();
     if (!alias) continue;
     const aliasKey = normalizeAliasKey(alias);
     byAlias.set(aliasKey, { alias, ref: parsed });
@@ -126,15 +116,12 @@ export function resolveModelRefFromString(params: {
 }
 
 export function resolveConfiguredModelRef(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   defaultProvider: string;
   defaultModel: string;
 }): ModelRef {
   const rawModel = (() => {
-    const raw = params.cfg.agents?.defaults?.model as
-      | { primary?: string }
-      | string
-      | undefined;
+    const raw = params.cfg.agents?.defaults?.model as { primary?: string } | string | undefined;
     if (typeof raw === "string") return raw.trim();
     return raw?.primary?.trim() ?? "";
   })();
@@ -144,20 +131,62 @@ export function resolveConfiguredModelRef(params: {
       cfg: params.cfg,
       defaultProvider: params.defaultProvider,
     });
+    if (!trimmed.includes("/")) {
+      const aliasKey = normalizeAliasKey(trimmed);
+      const aliasMatch = aliasIndex.byAlias.get(aliasKey);
+      if (aliasMatch) return aliasMatch.ref;
+
+      // Default to anthropic if no provider is specified, but warn as this is deprecated.
+      console.warn(
+        `[moltbot] Model "${trimmed}" specified without provider. Falling back to "anthropic/${trimmed}". Please use "anthropic/${trimmed}" in your config.`,
+      );
+      return { provider: "anthropic", model: trimmed };
+    }
+
     const resolved = resolveModelRefFromString({
       raw: trimmed,
       defaultProvider: params.defaultProvider,
       aliasIndex,
     });
     if (resolved) return resolved.ref;
-    // TODO(steipete): drop this fallback once provider-less agents.defaults.model is fully deprecated.
-    return { provider: "anthropic", model: trimmed };
   }
   return { provider: params.defaultProvider, model: params.defaultModel };
 }
 
+export function resolveDefaultModelForAgent(params: {
+  cfg: MoltbotConfig;
+  agentId?: string;
+}): ModelRef {
+  const agentModelOverride = params.agentId
+    ? resolveAgentModelPrimary(params.cfg, params.agentId)
+    : undefined;
+  const cfg =
+    agentModelOverride && agentModelOverride.length > 0
+      ? {
+          ...params.cfg,
+          agents: {
+            ...params.cfg.agents,
+            defaults: {
+              ...params.cfg.agents?.defaults,
+              model: {
+                ...(typeof params.cfg.agents?.defaults?.model === "object"
+                  ? params.cfg.agents.defaults.model
+                  : undefined),
+                primary: agentModelOverride,
+              },
+            },
+          },
+        }
+      : params.cfg;
+  return resolveConfiguredModelRef({
+    cfg,
+    defaultProvider: DEFAULT_PROVIDER,
+    defaultModel: DEFAULT_MODEL,
+  });
+}
+
 export function buildAllowedModelSet(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   catalog: ModelCatalogEntry[];
   defaultProvider: string;
   defaultModel?: string;
@@ -176,9 +205,7 @@ export function buildAllowedModelSet(params: {
     defaultModel && params.defaultProvider
       ? modelKey(params.defaultProvider, defaultModel)
       : undefined;
-  const catalogKeys = new Set(
-    params.catalog.map((entry) => modelKey(entry.provider, entry.id)),
-  );
+  const catalogKeys = new Set(params.catalog.map((entry) => modelKey(entry.provider, entry.id)));
 
   if (allowAny) {
     if (defaultKey) catalogKeys.add(defaultKey);
@@ -190,10 +217,7 @@ export function buildAllowedModelSet(params: {
   }
 
   const allowedKeys = new Set<string>();
-  const configuredProviders = (params.cfg.models?.providers ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const configuredProviders = (params.cfg.models?.providers ?? {}) as Record<string, unknown>;
   for (const raw of rawAllowlist) {
     const parsed = parseModelRef(String(raw), params.defaultProvider);
     if (!parsed) continue;
@@ -238,7 +262,7 @@ export type ModelRefStatus = {
 };
 
 export function getModelRefStatus(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   catalog: ModelCatalogEntry[];
   ref: ModelRef;
   defaultProvider: string;
@@ -253,16 +277,14 @@ export function getModelRefStatus(params: {
   const key = modelKey(params.ref.provider, params.ref.model);
   return {
     key,
-    inCatalog: params.catalog.some(
-      (entry) => modelKey(entry.provider, entry.id) === key,
-    ),
+    inCatalog: params.catalog.some((entry) => modelKey(entry.provider, entry.id) === key),
     allowAny: allowed.allowAny,
     allowed: allowed.allowAny || allowed.allowedKeys.has(key),
   };
 }
 
 export function resolveAllowedModelRef(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   catalog: ModelCatalogEntry[];
   raw: string;
   defaultProvider: string;
@@ -301,7 +323,7 @@ export function resolveAllowedModelRef(params: {
 }
 
 export function resolveThinkingDefault(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   provider: string;
   model: string;
   catalog?: ModelCatalogEntry[];
@@ -320,7 +342,7 @@ export function resolveThinkingDefault(params: {
  * Returns null if hooks.gmail.model is not set.
  */
 export function resolveHooksGmailModel(params: {
-  cfg: ClawdbotConfig;
+  cfg: MoltbotConfig;
   defaultProvider: string;
 }): ModelRef | null {
   const hooksModel = params.cfg.hooks?.gmail?.model;

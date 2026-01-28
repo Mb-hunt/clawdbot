@@ -7,7 +7,7 @@ status: active
 
 # Sandbox vs Tool Policy vs Elevated
 
-Clawdbot has three related (but different) controls:
+Moltbot has three related (but different) controls:
 
 1. **Sandbox** (`agents.defaults.sandbox.*` / `agents.list[].sandbox.*`) decides **where tools run** (Docker vs host).
 2. **Tool policy** (`tools.*`, `tools.sandbox.tools.*`, `agents.list[].tools.*`) decides **which tools are available/allowed**.
@@ -15,13 +15,13 @@ Clawdbot has three related (but different) controls:
 
 ## Quick debug
 
-Use the inspector to see what Clawdbot is *actually* doing:
+Use the inspector to see what Moltbot is *actually* doing:
 
 ```bash
-clawdbot sandbox explain
-clawdbot sandbox explain --session agent:main:main
-clawdbot sandbox explain --agent work
-clawdbot sandbox explain --json
+moltbot sandbox explain
+moltbot sandbox explain --session agent:main:main
+moltbot sandbox explain --agent work
+moltbot sandbox explain --json
 ```
 
 It prints:
@@ -51,12 +51,17 @@ See [Sandboxing](/gateway/sandboxing) for the full matrix (scope, workspace moun
 
 Two layers matter:
 - **Tool profile**: `tools.profile` and `agents.list[].tools.profile` (base allowlist)
+- **Provider tool profile**: `tools.byProvider[provider].profile` and `agents.list[].tools.byProvider[provider].profile`
 - **Global/per-agent tool policy**: `tools.allow`/`tools.deny` and `agents.list[].tools.allow`/`agents.list[].tools.deny`
+- **Provider tool policy**: `tools.byProvider[provider].allow/deny` and `agents.list[].tools.byProvider[provider].allow/deny`
 - **Sandbox tool policy** (only applies when sandboxed): `tools.sandbox.tools.allow`/`tools.sandbox.tools.deny` and `agents.list[].tools.sandbox.tools.*`
 
 Rules of thumb:
 - `deny` always wins.
 - If `allow` is non-empty, everything else is treated as blocked.
+- Tool policy is the hard stop: `/exec` cannot override a denied `exec` tool.
+- `/exec` only changes session defaults for authorized senders; it does not grant tool access.
+Provider tool keys accept either `provider` (e.g. `google-antigravity`) or `provider/model` (e.g. `openai/gpt-5.2`).
 
 ### Tool groups (shorthands)
 
@@ -83,13 +88,16 @@ Available groups:
 - `group:automation`: `cron`, `gateway`
 - `group:messaging`: `message`
 - `group:nodes`: `nodes`
-- `group:clawdbot`: all built-in Clawdbot tools (excludes provider plugins)
+- `group:moltbot`: all built-in Moltbot tools (excludes provider plugins)
 
 ## Elevated: exec-only “run on host”
 
 Elevated does **not** grant extra tools; it only affects `exec`.
-- If you’re sandboxed, `/elevated on` (or `exec` with `elevated: true`) runs on the host.
+- If you’re sandboxed, `/elevated on` (or `exec` with `elevated: true`) runs on the host (approvals may still apply).
+- Use `/elevated full` to skip exec approvals for the session.
 - If you’re already running direct, elevated is effectively a no-op (still gated).
+- Elevated is **not** skill-scoped and does **not** override tool allow/deny.
+- `/exec` is separate from elevated. It only adjusts per-session exec defaults for authorized senders.
 
 Gates:
 - Enablement: `tools.elevated.enabled` (and optionally `agents.list[].tools.elevated.enabled`)

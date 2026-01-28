@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 
 describe("resolveSandboxContext", () => {
   it("does not sandbox the agent main session in non-main mode", async () => {
@@ -9,14 +9,13 @@ describe("resolveSandboxContext", () => {
       throw new Error("spawn should not be called");
     });
     vi.doMock("node:child_process", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("node:child_process")>();
+      const actual = await importOriginal<typeof import("node:child_process")>();
       return { ...actual, spawn };
     });
 
     const { resolveSandboxContext } = await import("./sandbox.js");
 
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         defaults: {
           sandbox: { mode: "non-main", scope: "session" },
@@ -28,7 +27,7 @@ describe("resolveSandboxContext", () => {
     const result = await resolveSandboxContext({
       config: cfg,
       sessionKey: "agent:main:main",
-      workspaceDir: "/tmp/clawdbot-test",
+      workspaceDir: "/tmp/moltbot-test",
     });
 
     expect(result).toBeNull();
@@ -44,14 +43,13 @@ describe("resolveSandboxContext", () => {
       throw new Error("spawn should not be called");
     });
     vi.doMock("node:child_process", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("node:child_process")>();
+      const actual = await importOriginal<typeof import("node:child_process")>();
       return { ...actual, spawn };
     });
 
     const { ensureSandboxWorkspaceForSession } = await import("./sandbox.js");
 
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       agents: {
         defaults: {
           sandbox: { mode: "non-main", scope: "session" },
@@ -63,7 +61,7 @@ describe("resolveSandboxContext", () => {
     const result = await ensureSandboxWorkspaceForSession({
       config: cfg,
       sessionKey: "agent:main:main",
-      workspaceDir: "/tmp/clawdbot-test",
+      workspaceDir: "/tmp/moltbot-test",
     });
 
     expect(result).toBeNull();
@@ -79,15 +77,14 @@ describe("resolveSandboxContext", () => {
       throw new Error("spawn should not be called");
     });
     vi.doMock("node:child_process", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("node:child_process")>();
+      const actual = await importOriginal<typeof import("node:child_process")>();
       return { ...actual, spawn };
     });
 
     const { ensureSandboxWorkspaceForSession, resolveSandboxContext } =
       await import("./sandbox.js");
 
-    const cfg: ClawdbotConfig = {
+    const cfg: MoltbotConfig = {
       session: { mainKey: "work" },
       agents: {
         defaults: {
@@ -101,7 +98,7 @@ describe("resolveSandboxContext", () => {
       await resolveSandboxContext({
         config: cfg,
         sessionKey: "main",
-        workspaceDir: "/tmp/clawdbot-test",
+        workspaceDir: "/tmp/moltbot-test",
       }),
     ).toBeNull();
 
@@ -109,7 +106,7 @@ describe("resolveSandboxContext", () => {
       await resolveSandboxContext({
         config: cfg,
         sessionKey: "agent:main:main",
-        workspaceDir: "/tmp/clawdbot-test",
+        workspaceDir: "/tmp/moltbot-test",
       }),
     ).toBeNull();
 
@@ -117,7 +114,7 @@ describe("resolveSandboxContext", () => {
       await ensureSandboxWorkspaceForSession({
         config: cfg,
         sessionKey: "work",
-        workspaceDir: "/tmp/clawdbot-test",
+        workspaceDir: "/tmp/moltbot-test",
       }),
     ).toBeNull();
 
@@ -125,7 +122,7 @@ describe("resolveSandboxContext", () => {
       await ensureSandboxWorkspaceForSession({
         config: cfg,
         sessionKey: "agent:main:main",
-        workspaceDir: "/tmp/clawdbot-test",
+        workspaceDir: "/tmp/moltbot-test",
       }),
     ).toBeNull();
 

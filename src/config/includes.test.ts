@@ -11,16 +11,16 @@ import {
 
 const ROOT_DIR = path.parse(process.cwd()).root;
 const CONFIG_DIR = path.join(ROOT_DIR, "config");
-const ETC_CLAWDBOT_DIR = path.join(ROOT_DIR, "etc", "clawdbot");
+const ETC_CLAWDBOT_DIR = path.join(ROOT_DIR, "etc", "moltbot");
 const SHARED_DIR = path.join(ROOT_DIR, "shared");
 
-const DEFAULT_BASE_PATH = path.join(CONFIG_DIR, "clawdbot.json");
+const DEFAULT_BASE_PATH = path.join(CONFIG_DIR, "moltbot.json");
 
 function configPath(...parts: string[]) {
   return path.join(CONFIG_DIR, ...parts);
 }
 
-function etcClawdbotPath(...parts: string[]) {
+function etcMoltbotPath(...parts: string[]) {
   return path.join(ETC_CLAWDBOT_DIR, ...parts);
 }
 
@@ -40,11 +40,7 @@ function createMockResolver(files: Record<string, unknown>): IncludeResolver {
   };
 }
 
-function resolve(
-  obj: unknown,
-  files: Record<string, unknown> = {},
-  basePath = DEFAULT_BASE_PATH,
-) {
+function resolve(obj: unknown, files: Record<string, unknown> = {}, basePath = DEFAULT_BASE_PATH) {
   return resolveConfigIncludes(obj, basePath, createMockResolver(files));
 }
 
@@ -74,7 +70,7 @@ describe("resolveConfigIncludes", () => {
   });
 
   it("resolves absolute path $include", () => {
-    const absolute = etcClawdbotPath("agents.json");
+    const absolute = etcMoltbotPath("agents.json");
     const files = { [absolute]: { list: [{ id: "main" }] } };
     const obj = { agents: { $include: absolute } };
     expect(resolve(obj, files)).toEqual({
@@ -163,12 +159,12 @@ describe("resolveConfigIncludes", () => {
       parseJson: JSON.parse,
     };
     const obj = { $include: "./bad.json" };
-    expect(() =>
-      resolveConfigIncludes(obj, DEFAULT_BASE_PATH, resolver),
-    ).toThrow(ConfigIncludeError);
-    expect(() =>
-      resolveConfigIncludes(obj, DEFAULT_BASE_PATH, resolver),
-    ).toThrow(/Failed to parse include file/);
+    expect(() => resolveConfigIncludes(obj, DEFAULT_BASE_PATH, resolver)).toThrow(
+      ConfigIncludeError,
+    );
+    expect(() => resolveConfigIncludes(obj, DEFAULT_BASE_PATH, resolver)).toThrow(
+      /Failed to parse include file/,
+    );
   });
 
   it("throws CircularIncludeError for circular includes", () => {
@@ -193,9 +189,7 @@ describe("resolveConfigIncludes", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(CircularIncludeError);
       const circular = err as CircularIncludeError;
-      expect(circular.chain).toEqual(
-        expect.arrayContaining([DEFAULT_BASE_PATH, aPath, bPath]),
-      );
+      expect(circular.chain).toEqual(expect.arrayContaining([DEFAULT_BASE_PATH, aPath, bPath]));
       expect(circular.message).toMatch(/Circular include detected/);
       expect(circular.message).toContain("a.json");
       expect(circular.message).toContain("b.json");
@@ -261,12 +255,8 @@ describe("resolveConfigIncludes", () => {
       };
     }
     failFiles[configPath("fail10.json")] = { done: true };
-    expect(() => resolve({ $include: "./fail0.json" }, failFiles)).toThrow(
-      ConfigIncludeError,
-    );
-    expect(() => resolve({ $include: "./fail0.json" }, failFiles)).toThrow(
-      /Maximum include depth/,
-    );
+    expect(() => resolve({ $include: "./fail0.json" }, failFiles)).toThrow(ConfigIncludeError);
+    expect(() => resolve({ $include: "./fail0.json" }, failFiles)).toThrow(/Maximum include depth/);
   });
 
   it("handles relative paths correctly", () => {
@@ -293,7 +283,7 @@ describe("resolveConfigIncludes", () => {
   it("resolves parent directory references", () => {
     const files = { [sharedPath("common.json")]: { shared: true } };
     const obj = { $include: "../../shared/common.json" };
-    expect(resolve(obj, files, configPath("sub", "clawdbot.json"))).toEqual({
+    expect(resolve(obj, files, configPath("sub", "moltbot.json"))).toEqual({
       shared: true,
     });
   });
@@ -361,11 +351,7 @@ describe("real-world config patterns", () => {
     };
 
     const obj = {
-      $include: [
-        "./gateway.json",
-        "./channels/whatsapp.json",
-        "./agents/defaults.json",
-      ],
+      $include: ["./gateway.json", "./channels/whatsapp.json", "./agents/defaults.json"],
     };
 
     expect(resolve(obj, files)).toEqual({

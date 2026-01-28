@@ -9,13 +9,19 @@ import {
 describe("channel registry", () => {
   it("normalizes aliases", () => {
     expect(normalizeChatChannelId("imsg")).toBe("imessage");
-    expect(normalizeChatChannelId("teams")).toBe("msteams");
+    expect(normalizeChatChannelId("gchat")).toBe("googlechat");
+    expect(normalizeChatChannelId("google-chat")).toBe("googlechat");
     expect(normalizeChatChannelId("web")).toBeNull();
   });
 
   it("keeps Telegram first in the default order", () => {
     const channels = listChatChannels();
     expect(channels[0]?.id).toBe("telegram");
+  });
+
+  it("does not include MS Teams by default", () => {
+    const channels = listChatChannels();
+    expect(channels.some((channel) => channel.id === "msteams")).toBe(false);
   });
 
   it("formats selection lines with docs labels", () => {
@@ -27,6 +33,6 @@ describe("channel registry", () => {
     );
     expect(line).not.toContain("Docs:");
     expect(line).toContain("/channels/telegram");
-    expect(line).toContain("https://clawd.bot");
+    expect(line).toContain("https://molt.bot");
   });
 });

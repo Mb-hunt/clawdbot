@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
-import type { ClawdbotConfig } from "../../config/config.js";
+import type { MoltbotConfig } from "../../config/config.js";
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { listAgentsForGateway } from "../../gateway/session-utils.js";
 
@@ -14,7 +14,7 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
-export async function getAgentLocalStatuses(cfg: ClawdbotConfig) {
+export async function getAgentLocalStatuses(cfg: MoltbotConfig) {
   const agentList = listAgentsForGateway(cfg);
   const now = Date.now();
 
@@ -28,9 +28,7 @@ export async function getAgentLocalStatuses(cfg: ClawdbotConfig) {
         }
       })();
       const bootstrapPending =
-        workspaceDir != null
-          ? await fileExists(path.join(workspaceDir, "BOOTSTRAP.md"))
-          : null;
+        workspaceDir != null ? await fileExists(path.join(workspaceDir, "BOOTSTRAP.md")) : null;
       const sessionsPath = resolveStorePath(cfg.session?.store, {
         agentId: agent.id,
       });
@@ -64,10 +62,7 @@ export async function getAgentLocalStatuses(cfg: ClawdbotConfig) {
   );
 
   const totalSessions = agents.reduce((sum, a) => sum + a.sessionsCount, 0);
-  const bootstrapPendingCount = agents.reduce(
-    (sum, a) => sum + (a.bootstrapPending ? 1 : 0),
-    0,
-  );
+  const bootstrapPendingCount = agents.reduce((sum, a) => sum + (a.bootstrapPending ? 1 : 0), 0);
   return {
     defaultId: agentList.defaultId,
     agents,

@@ -7,7 +7,7 @@ read_when:
 ---
 # Messages
 
-This page ties together how Clawdbot handles inbound messages, sessions, queueing,
+This page ties together how Moltbot handles inbound messages, sessions, queueing,
 streaming, and reasoning visibility.
 
 ## Message flow (high level)
@@ -29,9 +29,35 @@ See [Configuration](/gateway/configuration) for full schema.
 
 ## Inbound dedupe
 
-Channels can redeliver the same message after reconnects. Clawdbot keeps a
+Channels can redeliver the same message after reconnects. Moltbot keeps a
 short-lived cache keyed by channel/account/peer/session/message id so duplicate
 deliveries do not trigger another agent run.
+
+## Inbound debouncing
+
+Rapid consecutive messages from the **same sender** can be batched into a single
+agent turn via `messages.inbound`. Debouncing is scoped per channel + conversation
+and uses the most recent message for reply threading/IDs.
+
+Config (global default + per-channel overrides):
+```json5
+{
+  messages: {
+    inbound: {
+      debounceMs: 2000,
+      byChannel: {
+        whatsapp: 5000,
+        slack: 1500,
+        discord: 1500
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Debounce applies to **text-only** messages; media/attachments flush immediately.
+- Control commands bypass debouncing so they remain standalone.
 
 ## Sessions and devices
 
@@ -49,7 +75,7 @@ Details: [Session management](/concepts/session).
 
 ## Inbound bodies and history context
 
-Clawdbot separates the **prompt body** from the **command body**:
+Moltbot separates the **prompt body** from the **command body**:
 - `Body`: prompt text sent to the agent. This may include channel envelopes and
   optional history wrappers.
 - `CommandBody`: raw user text for directive/command parsing.
@@ -58,6 +84,14 @@ Clawdbot separates the **prompt body** from the **command body**:
 When a channel supplies history, it uses a shared wrapper:
 - `[Chat messages since your last reply - for context]`
 - `[Current message - respond to this]`
+
+For **non-direct chats** (groups/channels/rooms), the **current message body** is prefixed with the
+sender label (same style used for history entries). This keeps real-time and queued/history
+messages consistent in the agent prompt.
+
+History buffers are **pending-only**: they include group messages that did *not*
+trigger a run (for example, mention-gated messages) and **exclude** messages
+already in the session transcript.
 
 Directive stripping only applies to the **current message** section so history
 remains intact. Channels that wrap history should set `CommandBody` (or
@@ -93,7 +127,7 @@ Details: [Streaming + chunking](/concepts/streaming).
 
 ## Reasoning visibility and tokens
 
-Clawdbot can expose or hide model reasoning:
+Moltbot can expose or hide model reasoning:
 - `/reasoning on|off|stream` controls visibility.
 - Reasoning content still counts toward token usage when produced by the model.
 - Telegram supports reasoning stream into the draft bubble.

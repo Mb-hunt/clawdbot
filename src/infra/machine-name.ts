@@ -24,13 +24,16 @@ function fallbackHostName() {
     os
       .hostname()
       .replace(/\.local$/i, "")
-      .trim() || "clawdbot"
+      .trim() || "moltbot"
   );
 }
 
 export async function getMachineDisplayName(): Promise<string> {
   if (cachedPromise) return cachedPromise;
   cachedPromise = (async () => {
+    if (process.env.VITEST || process.env.NODE_ENV === "test") {
+      return fallbackHostName();
+    }
     if (process.platform === "darwin") {
       const computerName = await tryScutil("ComputerName");
       if (computerName) return computerName;

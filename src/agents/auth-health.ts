@@ -1,20 +1,13 @@
-import type { ClawdbotConfig } from "../config/config.js";
+import type { MoltbotConfig } from "../config/config.js";
 import {
   type AuthProfileCredential,
   type AuthProfileStore,
-  CLAUDE_CLI_PROFILE_ID,
-  CODEX_CLI_PROFILE_ID,
   resolveAuthProfileDisplayLabel,
 } from "./auth-profiles.js";
 
-export type AuthProfileSource = "claude-cli" | "codex-cli" | "store";
+export type AuthProfileSource = "store";
 
-export type AuthProfileHealthStatus =
-  | "ok"
-  | "expiring"
-  | "expired"
-  | "missing"
-  | "static";
+export type AuthProfileHealthStatus = "ok" | "expiring" | "expired" | "missing" | "static";
 
 export type AuthProfileHealth = {
   profileId: string;
@@ -27,12 +20,7 @@ export type AuthProfileHealth = {
   label: string;
 };
 
-export type AuthProviderHealthStatus =
-  | "ok"
-  | "expiring"
-  | "expired"
-  | "missing"
-  | "static";
+export type AuthProviderHealthStatus = "ok" | "expiring" | "expired" | "missing" | "static";
 
 export type AuthProviderHealth = {
   provider: string;
@@ -51,9 +39,7 @@ export type AuthHealthSummary = {
 
 export const DEFAULT_OAUTH_WARN_MS = 24 * 60 * 60 * 1000;
 
-export function resolveAuthProfileSource(profileId: string): AuthProfileSource {
-  if (profileId === CLAUDE_CLI_PROFILE_ID) return "claude-cli";
-  if (profileId === CODEX_CLI_PROFILE_ID) return "codex-cli";
+export function resolveAuthProfileSource(_profileId: string): AuthProfileSource {
   return "store";
 }
 
@@ -90,7 +76,7 @@ function buildProfileHealth(params: {
   profileId: string;
   credential: AuthProfileCredential;
   store: AuthProfileStore;
-  cfg?: ClawdbotConfig;
+  cfg?: MoltbotConfig;
   now: number;
   warnAfterMs: number;
 }): AuthProfileHealth {
@@ -111,8 +97,7 @@ function buildProfileHealth(params: {
 
   if (credential.type === "token") {
     const expiresAt =
-      typeof credential.expires === "number" &&
-      Number.isFinite(credential.expires)
+      typeof credential.expires === "number" && Number.isFinite(credential.expires)
         ? credential.expires
         : undefined;
     if (!expiresAt || expiresAt <= 0) {
@@ -125,11 +110,7 @@ function buildProfileHealth(params: {
         label,
       };
     }
-    const { status, remainingMs } = resolveOAuthStatus(
-      expiresAt,
-      now,
-      warnAfterMs,
-    );
+    const { status, remainingMs } = resolveOAuthStatus(expiresAt, now, warnAfterMs);
     return {
       profileId,
       provider: credential.provider,
@@ -142,11 +123,7 @@ function buildProfileHealth(params: {
     };
   }
 
-  const { status, remainingMs } = resolveOAuthStatus(
-    credential.expires,
-    now,
-    warnAfterMs,
-  );
+  const { status, remainingMs } = resolveOAuthStatus(credential.expires, now, warnAfterMs);
   return {
     profileId,
     provider: credential.provider,
@@ -161,7 +138,7 @@ function buildProfileHealth(params: {
 
 export function buildAuthHealthSummary(params: {
   store: AuthProfileStore;
-  cfg?: ClawdbotConfig;
+  cfg?: MoltbotConfig;
   warnAfterMs?: number;
   providers?: string[];
 }): AuthHealthSummary {
@@ -172,9 +149,7 @@ export function buildAuthHealthSummary(params: {
     : null;
 
   const profiles = Object.entries(params.store.profiles)
-    .filter(([_, cred]) =>
-      providerFilter ? providerFilter.has(cred.provider) : true,
-    )
+    .filter(([_, cred]) => (providerFilter ? providerFilter.has(cred.provider) : true))
     .map(([profileId, credential]) =>
       buildProfileHealth({
         profileId,
@@ -226,9 +201,7 @@ export function buildAuthHealthSummary(params: {
 
     const oauthProfiles = provider.profiles.filter((p) => p.type === "oauth");
     const tokenProfiles = provider.profiles.filter((p) => p.type === "token");
-    const apiKeyProfiles = provider.profiles.filter(
-      (p) => p.type === "api_key",
-    );
+    const apiKeyProfiles = provider.profiles.filter((p) => p.type === "api_key");
 
     const expirable = [...oauthProfiles, ...tokenProfiles];
     if (expirable.length === 0) {

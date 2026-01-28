@@ -6,7 +6,7 @@ import type { CallMode } from "./config.js";
 // Provider Identifiers
 // -----------------------------------------------------------------------------
 
-export const ProviderNameSchema = z.enum(["telnyx", "twilio", "mock"]);
+export const ProviderNameSchema = z.enum(["telnyx", "twilio", "plivo", "mock"]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 // -----------------------------------------------------------------------------
@@ -180,6 +180,7 @@ export type WebhookContext = {
   url: string;
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   query?: Record<string, string | string[] | undefined>;
+  remoteAddress?: string;
 };
 
 export type ProviderWebhookParseResult = {

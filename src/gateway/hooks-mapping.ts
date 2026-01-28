@@ -1,11 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  CONFIG_PATH_CLAWDBOT,
-  type HookMappingConfig,
-  type HooksConfig,
-} from "../config/config.js";
+import { CONFIG_PATH, type HookMappingConfig, type HooksConfig } from "../config/config.js";
 import type { HookMessageChannel } from "./hooks.js";
 
 export type HookMappingResolved = {
@@ -19,6 +15,7 @@ export type HookMappingResolved = {
   messageTemplate?: string;
   textTemplate?: string;
   deliver?: boolean;
+  allowUnsafeExternalContent?: boolean;
   channel?: HookMessageChannel;
   to?: string;
   model?: string;
@@ -52,6 +49,7 @@ export type HookAction =
       wakeMode: "now" | "next-heartbeat";
       sessionKey?: string;
       deliver?: boolean;
+      allowUnsafeExternalContent?: boolean;
       channel?: HookMessageChannel;
       to?: string;
       model?: string;
@@ -90,6 +88,7 @@ type HookTransformResult = Partial<{
   name: string;
   sessionKey: string;
   deliver: boolean;
+  allowUnsafeExternalContent: boolean;
   channel: HookMessageChannel;
   to: string;
   model: string;
@@ -101,26 +100,33 @@ type HookTransformFn = (
   ctx: HookMappingContext,
 ) => HookTransformResult | Promise<HookTransformResult>;
 
-export function resolveHookMappings(
-  hooks?: HooksConfig,
-): HookMappingResolved[] {
+export function resolveHookMappings(hooks?: HooksConfig): HookMappingResolved[] {
   const presets = hooks?.presets ?? [];
+  const gmailAllowUnsafe = hooks?.gmail?.allowUnsafeExternalContent;
   const mappings: HookMappingConfig[] = [];
   if (hooks?.mappings) mappings.push(...hooks.mappings);
   for (const preset of presets) {
     const presetMappings = hookPresetMappings[preset];
-    if (presetMappings) mappings.push(...presetMappings);
+    if (!presetMappings) continue;
+    if (preset === "gmail" && typeof gmailAllowUnsafe === "boolean") {
+      mappings.push(
+        ...presetMappings.map((mapping) => ({
+          ...mapping,
+          allowUnsafeExternalContent: gmailAllowUnsafe,
+        })),
+      );
+      continue;
+    }
+    mappings.push(...presetMappings);
   }
   if (mappings.length === 0) return [];
 
-  const configDir = path.dirname(CONFIG_PATH_CLAWDBOT);
+  const configDir = path.dirname(CONFIG_PATH);
   const transformsDir = hooks?.transformsDir
     ? resolvePath(configDir, hooks.transformsDir)
     : configDir;
 
-  return mappings.map((mapping, index) =>
-    normalizeHookMapping(mapping, index, transformsDir),
-  );
+  return mappings.map((mapping, index) => normalizeHookMapping(mapping, index, transformsDir));
 }
 
 export async function applyHookMappings(
@@ -179,6 +185,7 @@ function normalizeHookMapping(
     messageTemplate: mapping.messageTemplate,
     textTemplate: mapping.textTemplate,
     deliver: mapping.deliver,
+    allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
     channel: mapping.channel,
     to: mapping.to,
     model: mapping.model,
@@ -193,8 +200,7 @@ function mappingMatches(mapping: HookMappingResolved, ctx: HookMappingContext) {
     if (mapping.matchPath !== normalizeMatchPath(ctx.path)) return false;
   }
   if (mapping.matchSource) {
-    const source =
-      typeof ctx.payload.source === "string" ? ctx.payload.source : undefined;
+    const source = typeof ctx.payload.source === "string" ? ctx.payload.source : undefined;
     if (!source || source !== mapping.matchSource) return false;
   }
   return true;
@@ -225,6 +231,7 @@ function buildActionFromMapping(
       wakeMode: mapping.wakeMode ?? "now",
       sessionKey: renderOptional(mapping.sessionKey, ctx),
       deliver: mapping.deliver,
+      allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
       channel: mapping.channel,
       to: renderOptional(mapping.to, ctx),
       model: renderOptional(mapping.model, ctx),
@@ -242,40 +249,29 @@ function mergeAction(
   if (!override) {
     return validateAction(base);
   }
-  const kind = (override.kind ?? base.kind ?? defaultAction) as
-    | "wake"
-    | "agent";
+  const kind = (override.kind ?? base.kind ?? defaultAction) as "wake" | "agent";
   if (kind === "wake") {
     const baseWake = base.kind === "wake" ? base : undefined;
-    const text =
-      typeof override.text === "string"
-        ? override.text
-        : (baseWake?.text ?? "");
-    const mode =
-      override.mode === "next-heartbeat"
-        ? "next-heartbeat"
-        : (baseWake?.mode ?? "now");
+    const text = typeof override.text === "string" ? override.text : (baseWake?.text ?? "");
+    const mode = override.mode === "next-heartbeat" ? "next-heartbeat" : (baseWake?.mode ?? "now");
     return validateAction({ kind: "wake", text, mode });
   }
   const baseAgent = base.kind === "agent" ? base : undefined;
   const message =
-    typeof override.message === "string"
-      ? override.message
-      : (baseAgent?.message ?? "");
+    typeof override.message === "string" ? override.message : (baseAgent?.message ?? "");
   const wakeMode =
-    override.wakeMode === "next-heartbeat"
-      ? "next-heartbeat"
-      : (baseAgent?.wakeMode ?? "now");
+    override.wakeMode === "next-heartbeat" ? "next-heartbeat" : (baseAgent?.wakeMode ?? "now");
   return validateAction({
     kind: "agent",
     message,
     wakeMode,
     name: override.name ?? baseAgent?.name,
     sessionKey: override.sessionKey ?? baseAgent?.sessionKey,
-    deliver:
-      typeof override.deliver === "boolean"
-        ? override.deliver
-        : baseAgent?.deliver,
+    deliver: typeof override.deliver === "boolean" ? override.deliver : baseAgent?.deliver,
+    allowUnsafeExternalContent:
+      typeof override.allowUnsafeExternalContent === "boolean"
+        ? override.allowUnsafeExternalContent
+        : baseAgent?.allowUnsafeExternalContent,
     channel: override.channel ?? baseAgent?.channel,
     to: override.to ?? baseAgent?.to,
     model: override.model ?? baseAgent?.model,
@@ -297,9 +293,7 @@ function validateAction(action: HookAction): HookMappingResult {
   return { ok: true, action };
 }
 
-async function loadTransform(
-  transform: HookMappingTransformResolved,
-): Promise<HookTransformFn> {
+async function loadTransform(transform: HookMappingTransformResolved): Promise<HookTransformFn> {
   const cached = transformCache.get(transform.modulePath);
   if (cached) return cached;
   const url = pathToFileURL(transform.modulePath).href;
@@ -309,13 +303,8 @@ async function loadTransform(
   return fn;
 }
 
-function resolveTransformFn(
-  mod: Record<string, unknown>,
-  exportName?: string,
-): HookTransformFn {
-  const candidate = exportName
-    ? mod[exportName]
-    : (mod.default ?? mod.transform);
+function resolveTransformFn(mod: Record<string, unknown>, exportName?: string): HookTransformFn {
+  const candidate = exportName ? mod[exportName] : (mod.default ?? mod.transform);
   if (typeof candidate !== "function") {
     throw new Error("hook transform module must export a function");
   }
@@ -347,8 +336,7 @@ function renderTemplate(template: string, ctx: HookMappingContext) {
     const value = resolveTemplateExpr(expr.trim(), ctx);
     if (value === undefined || value === null) return "";
     if (typeof value === "string") return value;
-    if (typeof value === "number" || typeof value === "boolean")
-      return String(value);
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
     return JSON.stringify(value);
   });
 }

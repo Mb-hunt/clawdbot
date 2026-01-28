@@ -1,4 +1,4 @@
-const DEFAULT_TAGLINE = "All your chats, one Clawdbot.";
+const DEFAULT_TAGLINE = "All your chats, one Moltbot.";
 
 const HOLIDAY_TAGLINES = {
   newYear:
@@ -88,6 +88,7 @@ const TAGLINES: string[] = [
   "Your AI assistant, now without the $3,499 headset.",
   "Think different. Actually think.",
   "Ah, the fruit tree company! 🍎",
+  "Greetings, Professor Falken",
   HOLIDAY_TAGLINES.newYear,
   HOLIDAY_TAGLINES.lunarNewYear,
   HOLIDAY_TAGLINES.christmas,
@@ -234,9 +235,7 @@ export interface TaglineOptions {
 export function activeTaglines(options: TaglineOptions = {}): string[] {
   if (TAGLINES.length === 0) return [DEFAULT_TAGLINE];
   const today = options.now ? options.now() : new Date();
-  const filtered = TAGLINES.filter((tagline) =>
-    isTaglineActive(tagline, today),
-  );
+  const filtered = TAGLINES.filter((tagline) => isTaglineActive(tagline, today));
   return filtered.length > 0 ? filtered : TAGLINES;
 }
 

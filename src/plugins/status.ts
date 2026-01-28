@@ -1,11 +1,8 @@
-import {
-  resolveAgentWorkspaceDir,
-  resolveDefaultAgentId,
-} from "../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import { loadConfig } from "../config/config.js";
-import { createSubsystemLogger } from "../logging.js";
-import { loadClawdbotPlugins } from "./loader.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+import { loadMoltbotPlugins } from "./loader.js";
 import type { PluginRegistry } from "./registry.js";
 
 export type PluginStatusReport = PluginRegistry & {
@@ -24,7 +21,7 @@ export function buildPluginStatusReport(params?: {
     : (resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config)) ??
       resolveDefaultAgentWorkspaceDir());
 
-  const registry = loadClawdbotPlugins({
+  const registry = loadMoltbotPlugins({
     config,
     workspaceDir,
     logger: {
