@@ -1,18 +1,20 @@
-import type { MoltbotConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ReplyPayload } from "../types.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 import { withOptions } from "./directive-handling.shared.js";
-import { resolveQueueSettings } from "./queue.js";
+import { resolveQueueSettings } from "./queue/settings.js";
 
 export function maybeHandleQueueDirective(params: {
   directives: InlineDirectives;
-  cfg: MoltbotConfig;
+  cfg: OpenClawConfig;
   channel: string;
   sessionEntry?: SessionEntry;
 }): ReplyPayload | undefined {
   const { directives } = params;
-  if (!directives.hasQueueDirective) return undefined;
+  if (!directives.hasQueueDirective) {
+    return undefined;
+  }
 
   const wantsStatus =
     !directives.queueMode &&
@@ -35,7 +37,7 @@ export function maybeHandleQueueDirective(params: {
     return {
       text: withOptions(
         `Current queue settings: mode=${settings.mode}, debounce=${debounceLabel}, cap=${capLabel}, drop=${dropLabel}.`,
-        "modes steer, followup, collect, steer+backlog, interrupt; debounce:<ms|s|m>, cap:<n>, drop:old|new|summarize",
+        "modes steer, followup, collect, interrupt; debounce:<ms|s|m>, cap:<n>, drop:old|new|summarize",
       ),
     };
   }
@@ -51,7 +53,7 @@ export function maybeHandleQueueDirective(params: {
     const errors: string[] = [];
     if (queueModeInvalid) {
       errors.push(
-        `Unrecognized queue mode "${directives.rawQueueMode ?? ""}". Valid modes: steer, followup, collect, steer+backlog, interrupt.`,
+        `Unrecognized queue mode "${directives.rawQueueMode ?? ""}". Valid modes: steer, followup, collect, interrupt.`,
       );
     }
     if (queueDebounceInvalid) {

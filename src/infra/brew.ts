@@ -11,24 +11,33 @@ function isExecutable(filePath: string): boolean {
   }
 }
 
-function normalizePathValue(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
+type BrewResolutionOptions = {
+  homeDir?: string;
+  /**
+   * @deprecated No-op compatibility field for plugin SDK callers. Homebrew
+   * env vars are ignored for resolution because workspace env can be untrusted.
+   */
+  env?: NodeJS.ProcessEnv;
+};
+
+function resolveBrewFromPath(pathEnv = process.env.PATH): string | undefined {
+  for (const dir of (pathEnv ?? "").split(path.delimiter)) {
+    const trimmed = dir.trim();
+    if (!trimmed || !path.isAbsolute(trimmed)) {
+      continue;
+    }
+    const candidate = path.join(trimmed, "brew");
+    if (isExecutable(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
-export function resolveBrewPathDirs(opts?: {
-  homeDir?: string;
-  env?: NodeJS.ProcessEnv;
-}): string[] {
+export function resolveBrewPathDirs(opts?: BrewResolutionOptions): string[] {
   const homeDir = opts?.homeDir ?? os.homedir();
-  const env = opts?.env ?? process.env;
 
   const dirs: string[] = [];
-  const prefix = normalizePathValue(env.HOMEBREW_PREFIX);
-  if (prefix) {
-    dirs.push(path.join(prefix, "bin"), path.join(prefix, "sbin"));
-  }
 
   // Linuxbrew defaults.
   dirs.push(path.join(homeDir, ".linuxbrew", "bin"));
@@ -41,20 +50,15 @@ export function resolveBrewPathDirs(opts?: {
   return dirs;
 }
 
-export function resolveBrewExecutable(opts?: {
-  homeDir?: string;
-  env?: NodeJS.ProcessEnv;
-}): string | undefined {
+export function resolveBrewExecutable(opts?: BrewResolutionOptions): string | undefined {
   const homeDir = opts?.homeDir ?? os.homedir();
-  const env = opts?.env ?? process.env;
+
+  const pathBrew = resolveBrewFromPath();
+  if (pathBrew) {
+    return pathBrew;
+  }
 
   const candidates: string[] = [];
-
-  const brewFile = normalizePathValue(env.HOMEBREW_BREW_FILE);
-  if (brewFile) candidates.push(brewFile);
-
-  const prefix = normalizePathValue(env.HOMEBREW_PREFIX);
-  if (prefix) candidates.push(path.join(prefix, "bin", "brew"));
 
   // Linuxbrew defaults.
   candidates.push(path.join(homeDir, ".linuxbrew", "bin", "brew"));
@@ -64,7 +68,9 @@ export function resolveBrewExecutable(opts?: {
   candidates.push("/opt/homebrew/bin/brew", "/usr/local/bin/brew");
 
   for (const candidate of candidates) {
-    if (isExecutable(candidate)) return candidate;
+    if (isExecutable(candidate)) {
+      return candidate;
+    }
   }
 
   return undefined;

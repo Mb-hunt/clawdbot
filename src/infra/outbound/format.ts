@@ -1,8 +1,12 @@
+import { getChatChannelMeta } from "../../channels/chat-meta.js";
 import { getChannelPlugin } from "../../channels/plugins/index.js";
-import { getChatChannelMeta, normalizeChatChannelId } from "../../channels/registry.js";
-import type { ChannelId } from "../../channels/plugins/types.js";
+import type { ChannelId } from "../../channels/plugins/types.public.js";
+import { normalizeChatChannelId } from "../../channels/registry.js";
 import type { OutboundDeliveryResult } from "./deliver.js";
 
+/**
+ * Machine-readable delivery result emitted by outbound send commands.
+ */
 export type OutboundDeliveryJson = {
   channel: string;
   via: "direct" | "gateway";
@@ -31,12 +35,20 @@ type OutboundDeliveryMeta = {
 
 const resolveChannelLabel = (channel: string) => {
   const pluginLabel = getChannelPlugin(channel as ChannelId)?.meta.label;
-  if (pluginLabel) return pluginLabel;
+  if (pluginLabel) {
+    return pluginLabel;
+  }
+  // Some legacy chat channels are not plugins; keep their human labels for CLI output.
   const normalized = normalizeChatChannelId(channel);
-  if (normalized) return getChatChannelMeta(normalized).label;
+  if (normalized) {
+    return getChatChannelMeta(normalized).label;
+  }
   return channel;
 };
 
+/**
+ * Formats the human-readable direct delivery summary for CLI output.
+ */
 export function formatOutboundDeliverySummary(
   channel: string,
   result?: OutboundDeliveryResult,
@@ -48,13 +60,24 @@ export function formatOutboundDeliverySummary(
   const label = resolveChannelLabel(result.channel);
   const base = `✅ Sent via ${label}. Message ID: ${result.messageId}`;
 
-  if ("chatId" in result) return `${base} (chat ${result.chatId})`;
-  if ("channelId" in result) return `${base} (channel ${result.channelId})`;
-  if ("roomId" in result) return `${base} (room ${result.roomId})`;
-  if ("conversationId" in result) return `${base} (conversation ${result.conversationId})`;
+  if ("chatId" in result) {
+    return `${base} (chat ${result.chatId})`;
+  }
+  if ("channelId" in result) {
+    return `${base} (channel ${result.channelId})`;
+  }
+  if ("roomId" in result) {
+    return `${base} (room ${result.roomId})`;
+  }
+  if ("conversationId" in result) {
+    return `${base} (conversation ${result.conversationId})`;
+  }
   return base;
 }
 
+/**
+ * Builds the JSON delivery payload returned by direct or gateway sends.
+ */
 export function buildOutboundDeliveryJson(params: {
   channel: string;
   to: string;
@@ -97,6 +120,9 @@ export function buildOutboundDeliveryJson(params: {
   return payload;
 }
 
+/**
+ * Formats the human-readable gateway delivery summary for CLI output.
+ */
 export function formatGatewaySummary(params: {
   action?: string;
   channel?: string;

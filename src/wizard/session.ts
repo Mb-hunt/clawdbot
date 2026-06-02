@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-
 import { WizardCancelledError, type WizardProgress, type WizardPrompter } from "./prompts.js";
 
 export type WizardStepOption = {
@@ -13,6 +12,7 @@ export type WizardStep = {
   type: "note" | "select" | "text" | "confirm" | "multiselect" | "progress" | "action";
   title?: string;
   message?: string;
+  format?: "plain";
   options?: WizardStepOption[];
   initialValue?: unknown;
   placeholder?: string;
@@ -70,6 +70,10 @@ class WizardSessionPrompter implements WizardPrompter {
     await this.prompt({ type: "note", title, message, executor: "client" });
   }
 
+  async plain(message: string): Promise<void> {
+    await this.prompt({ type: "note", message, format: "plain", executor: "client" });
+  }
+
   async select<T>(params: {
     message: string;
     options: Array<{ value: T; label: string; hint?: string }>;
@@ -113,12 +117,14 @@ class WizardSessionPrompter implements WizardPrompter {
     initialValue?: string;
     placeholder?: string;
     validate?: (value: string) => string | undefined;
+    sensitive?: boolean;
   }): Promise<string> {
     const res = await this.prompt({
       type: "text",
       message: params.message,
       initialValue: params.initialValue,
       placeholder: params.placeholder,
+      sensitive: params.sensitive,
       executor: "client",
     });
     const value =
@@ -164,6 +170,7 @@ class WizardSessionPrompter implements WizardPrompter {
 export class WizardSession {
   private currentStep: WizardStep | null = null;
   private stepDeferred: Deferred<WizardStep | null> | null = null;
+  private pendingTerminalResolution = false;
   private answerDeferred = new Map<string, Deferred<unknown>>();
   private status: WizardSessionStatus = "running";
   private error: string | undefined;
@@ -176,6 +183,10 @@ export class WizardSession {
   async next(): Promise<WizardNextResult> {
     if (this.currentStep) {
       return { done: false, step: this.currentStep, status: this.status };
+    }
+    if (this.pendingTerminalResolution) {
+      this.pendingTerminalResolution = false;
+      return { done: true, status: this.status, error: this.error };
     }
     if (this.status !== "running") {
       return { done: true, status: this.status, error: this.error };
@@ -201,7 +212,9 @@ export class WizardSession {
   }
 
   cancel() {
-    if (this.status !== "running") return;
+    if (this.status !== "running") {
+      return;
+    }
     this.status = "cancelled";
     this.error = "cancelled";
     this.currentStep = null;
@@ -245,7 +258,12 @@ export class WizardSession {
   }
 
   private resolveStep(step: WizardStep | null) {
-    if (!this.stepDeferred) return;
+    if (!this.stepDeferred) {
+      if (step === null) {
+        this.pendingTerminalResolution = true;
+      }
+      return;
+    }
     const deferred = this.stepDeferred;
     this.stepDeferred = null;
     deferred.resolve(step);

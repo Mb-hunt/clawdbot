@@ -1,12 +1,29 @@
 {
-  "name": "@moltbot/zalo",
-  "version": "2026.1.27-beta.1",
+  "name": "@openclaw/zalo",
+  "version": "2026.6.2",
+  "description": "OpenClaw Zalo channel plugin for bot and webhook chats.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/openclaw"
+  },
   "type": "module",
-  "description": "Moltbot Zalo channel plugin",
-  "moltbot": {
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*",
+    "openclaw": "2026.5.28"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.6.2"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
     "extensions": [
       "./index.ts"
     ],
+    "setupEntry": "./setup-entry.ts",
     "channel": {
       "id": "zalo",
       "label": "Zalo",
@@ -21,13 +38,22 @@
       "quickstartAllowFrom": true
     },
     "install": {
-      "npmSpec": "@moltbot/zalo",
-      "localPath": "extensions/zalo",
-      "defaultChoice": "npm"
+      "npmSpec": "@openclaw/zalo",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.10"
+    },
+    "compat": {
+      "pluginApi": ">=2026.6.2"
+    },
+    "build": {
+      "openclawVersion": "2026.6.2"
+    },
+    "release": {
+      "publishToClawHub": true,
+      "publishToNpm": true
     }
   },
   "dependencies": {
-    "moltbot": "workspace:*",
-    "undici": "7.19.0"
+    "zod": "4.4.3"
   }
 }

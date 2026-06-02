@@ -1,18 +1,24 @@
-import type { MoltbotPluginApi } from "clawdbot/plugin-sdk";
-import { emptyPluginConfigSchema } from "clawdbot/plugin-sdk";
+import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 
-import { telegramPlugin } from "./src/channel.js";
-import { setTelegramRuntime } from "./src/runtime.js";
-
-const plugin = {
+export default defineBundledChannelEntry({
   id: "telegram",
   name: "Telegram",
   description: "Telegram channel plugin",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: MoltbotPluginApi) {
-    setTelegramRuntime(api.runtime);
-    api.registerChannel({ plugin: telegramPlugin });
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./channel-plugin-api.js",
+    exportName: "telegramPlugin",
   },
-};
-
-export default plugin;
+  secrets: {
+    specifier: "./secret-contract-api.js",
+    exportName: "channelSecrets",
+  },
+  runtime: {
+    specifier: "./runtime-setter-api.js",
+    exportName: "setTelegramRuntime",
+  },
+  accountInspect: {
+    specifier: "./account-inspect-api.js",
+    exportName: "inspectTelegramReadOnlyAccount",
+  },
+});

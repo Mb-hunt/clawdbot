@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { formatErrorMessage } from "../infra/errors.js";
 
 type UpdateFileChunk = {
   changeContext?: string;
@@ -7,12 +8,18 @@ type UpdateFileChunk = {
   isEndOfFile: boolean;
 };
 
+async function defaultReadFile(filePath: string): Promise<string> {
+  return fs.readFile(filePath, "utf8");
+}
+
 export async function applyUpdateHunk(
   filePath: string,
   chunks: UpdateFileChunk[],
+  options?: { readFile?: (filePath: string) => Promise<string> },
 ): Promise<string> {
-  const originalContents = await fs.readFile(filePath, "utf8").catch((err) => {
-    throw new Error(`Failed to read file to update ${filePath}: ${err}`);
+  const reader = options?.readFile ?? defaultReadFile;
+  const originalContents = await reader(filePath).catch((err: unknown) => {
+    throw new Error(`Failed to read file to update ${filePath}: ${formatErrorMessage(err)}`);
   });
 
   const originalLines = originalContents.split("\n");
@@ -47,10 +54,13 @@ function computeReplacements(
 
     if (chunk.oldLines.length === 0) {
       const insertionIndex =
-        originalLines.length > 0 && originalLines[originalLines.length - 1] === ""
-          ? originalLines.length - 1
-          : originalLines.length;
+        chunk.changeContext && !chunk.isEndOfFile
+          ? lineIndex
+          : originalLines.length > 0 && originalLines[originalLines.length - 1] === ""
+            ? originalLines.length - 1
+            : originalLines.length;
       replacements.push([insertionIndex, 0, chunk.newLines]);
+      lineIndex = insertionIndex;
       continue;
     }
 
@@ -85,7 +95,7 @@ function applyReplacements(
   replacements: Array<[number, number, string[]]>,
 ): string[] {
   const result = [...lines];
-  for (const [startIndex, oldLen, newLines] of [...replacements].reverse()) {
+  for (const [startIndex, oldLen, newLines] of [...replacements].toReversed()) {
     for (let i = 0; i < oldLen; i += 1) {
       if (startIndex < result.length) {
         result.splice(startIndex, 1);
@@ -104,21 +114,33 @@ function seekSequence(
   start: number,
   eof: boolean,
 ): number | null {
-  if (pattern.length === 0) return start;
-  if (pattern.length > lines.length) return null;
+  if (pattern.length === 0) {
+    return start;
+  }
+  if (pattern.length > lines.length) {
+    return null;
+  }
 
   const maxStart = lines.length - pattern.length;
   const searchStart = eof && lines.length >= pattern.length ? maxStart : start;
-  if (searchStart > maxStart) return null;
+  if (searchStart > maxStart) {
+    return null;
+  }
 
   for (let i = searchStart; i <= maxStart; i += 1) {
-    if (linesMatch(lines, pattern, i, (value) => value)) return i;
+    if (linesMatch(lines, pattern, i, (value) => value)) {
+      return i;
+    }
   }
   for (let i = searchStart; i <= maxStart; i += 1) {
-    if (linesMatch(lines, pattern, i, (value) => value.trimEnd())) return i;
+    if (linesMatch(lines, pattern, i, (value) => value.trimEnd())) {
+      return i;
+    }
   }
   for (let i = searchStart; i <= maxStart; i += 1) {
-    if (linesMatch(lines, pattern, i, (value) => value.trim())) return i;
+    if (linesMatch(lines, pattern, i, (value) => value.trim())) {
+      return i;
+    }
   }
   for (let i = searchStart; i <= maxStart; i += 1) {
     if (linesMatch(lines, pattern, i, (value) => normalizePunctuation(value.trim()))) {

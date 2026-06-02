@@ -1,5 +1,5 @@
+import { isRich, theme } from "../../../packages/terminal-core/src/theme.js";
 import { defaultRuntime } from "../../runtime.js";
-import { isRich, theme } from "../../terminal/theme.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { unauthorizedHintForMessage } from "./rpc.js";
 
@@ -22,7 +22,9 @@ export function runNodesCommand(label: string, action: () => Promise<void>) {
     const { error, warn } = getNodesTheme();
     defaultRuntime.error(error(`nodes ${label} failed: ${message}`));
     const hint = unauthorizedHintForMessage(message);
-    if (hint) defaultRuntime.error(warn(hint));
+    if (hint) {
+      defaultRuntime.error(warn(hint));
+    }
     defaultRuntime.exit(1);
   });
 }

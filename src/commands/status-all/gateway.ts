@@ -1,21 +1,29 @@
 import fs from "node:fs/promises";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { classifyOAuthRefreshFailureReason } from "../../agents/auth-profiles/oauth-refresh-failure.js";
 
 export async function readFileTailLines(filePath: string, maxLines: number): Promise<string[]> {
   const raw = await fs.readFile(filePath, "utf8").catch(() => "");
-  if (!raw.trim()) return [];
+  if (!raw.trim()) {
+    return [];
+  }
   const lines = raw.replace(/\r/g, "").split("\n");
   const out = lines.slice(Math.max(0, lines.length - maxLines));
   return out.map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 }
 
 function countMatches(haystack: string, needle: string): number {
-  if (!haystack || !needle) return 0;
+  if (!haystack || !needle) {
+    return 0;
+  }
   return haystack.split(needle).length - 1;
 }
 
 function shorten(message: string, maxLen: number): string {
   const cleaned = message.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= maxLen) return cleaned;
+  if (cleaned.length <= maxLen) {
+    return cleaned;
+  }
   return `${cleaned.slice(0, Math.max(0, maxLen - 1))}…`;
 }
 
@@ -34,7 +42,9 @@ function consumeJsonBlock(
 ): { json: string; endIndex: number } | null {
   const startLine = lines[startIndex] ?? "";
   const braceAt = startLine.indexOf("{");
-  if (braceAt < 0) return null;
+  if (braceAt < 0) {
+    return null;
+  }
 
   const parts: string[] = [startLine.slice(braceAt)];
   let depth = countMatches(parts[0] ?? "", "{") - countMatches(parts[0] ?? "", "}");
@@ -66,7 +76,9 @@ export function summarizeLogTail(rawLines: string[], opts?: { maxLines?: number 
 
   const addLine = (line: string) => {
     const trimmed = line.trimEnd();
-    if (!trimmed) return;
+    if (!trimmed) {
+      return;
+    }
     out.push(trimmed);
   };
 
@@ -87,7 +99,7 @@ export function summarizeLogTail(rawLines: string[], opts?: { maxLines?: number 
       continue;
     }
 
-    // "[openai-codex] Token refresh failed: 401 { ...json... }"
+    // "[openai] Token refresh failed: 401 { ...json... }"
     const tokenRefresh = line.match(/^\[([^\]]+)\]\s+Token refresh failed:\s*(\d+)\s*(\{)?\s*$/);
     if (tokenRefresh) {
       const tag = tokenRefresh[1] ?? "unknown";
@@ -104,25 +116,22 @@ export function summarizeLogTail(rawLines: string[], opts?: { maxLines?: number 
             return null;
           }
         })();
-        const code = parsed?.error?.code?.trim() || null;
-        const msg = parsed?.error?.message?.trim() || null;
-        const msgShort = msg
-          ? msg.toLowerCase().includes("signing in again")
-            ? "re-auth required"
-            : shorten(msg, 52)
-          : null;
+        const code = normalizeOptionalString(parsed?.error?.code) ?? null;
+        const msg = normalizeOptionalString(parsed?.error?.message) ?? null;
+        const refreshReason = classifyOAuthRefreshFailureReason(msg ?? "");
+        const msgShort = msg ? (refreshReason ? "re-auth required" : shorten(msg, 52)) : null;
         const base = `[${tag}] token refresh ${status}${code ? ` ${code}` : ""}${msgShort ? ` · ${msgShort}` : ""}`;
         addGroup(`token:${tag}:${status}:${code ?? ""}:${msgShort ?? ""}`, base);
         continue;
       }
     }
 
-    // "Embedded agent failed before reply: OAuth token refresh failed for openai-codex: ..."
+    // "Embedded agent failed before reply: OAuth token refresh failed for openai: ..."
     const embedded = line.match(
       /^Embedded agent failed before reply:\s+OAuth token refresh failed for ([^:]+):/,
     );
     if (embedded) {
-      const provider = embedded[1]?.trim() || "unknown";
+      const provider = normalizeOptionalString(embedded[1]) || "unknown";
       addGroup(`embedded:${provider}`, `Embedded agent: OAuth token refresh failed (${provider})`);
       continue;
     }
@@ -142,17 +151,23 @@ export function summarizeLogTail(rawLines: string[], opts?: { maxLines?: number 
   }
 
   for (const g of groups.values()) {
-    if (g.count <= 1) continue;
+    if (g.count <= 1) {
+      continue;
+    }
     out[g.index] = `${g.base} ×${g.count}`;
   }
 
   const deduped: string[] = [];
   for (const line of out) {
-    if (deduped[deduped.length - 1] === line) continue;
+    if (deduped[deduped.length - 1] === line) {
+      continue;
+    }
     deduped.push(line);
   }
 
-  if (deduped.length <= maxLines) return deduped;
+  if (deduped.length <= maxLines) {
+    return deduped;
+  }
 
   const head = Math.min(6, Math.floor(maxLines / 3));
   const tail = Math.max(1, maxLines - head - 1);
@@ -162,22 +177,4 @@ export function summarizeLogTail(rawLines: string[], opts?: { maxLines?: number 
     ...deduped.slice(-tail),
   ];
   return kept;
-}
-
-export function pickGatewaySelfPresence(presence: unknown): {
-  host?: string;
-  ip?: string;
-  version?: string;
-  platform?: string;
-} | null {
-  if (!Array.isArray(presence)) return null;
-  const entries = presence as Array<Record<string, unknown>>;
-  const self = entries.find((e) => e.mode === "gateway" && e.reason === "self") ?? null;
-  if (!self) return null;
-  return {
-    host: typeof self.host === "string" ? self.host : undefined,
-    ip: typeof self.ip === "string" ? self.ip : undefined,
-    version: typeof self.version === "string" ? self.version : undefined,
-    platform: typeof self.platform === "string" ? self.platform : undefined,
-  };
 }

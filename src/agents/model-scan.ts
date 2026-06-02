@@ -1,13 +1,23 @@
+import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import {
-  type Context,
-  complete,
-  getEnvApiKey,
-  getModel,
-  type Model,
-  type OpenAICompletionsOptions,
-  type Tool,
-} from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+  asDateTimestampMs,
+  resolveTimerTimeoutMs,
+} from "@openclaw/normalization-core/number-coercion";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
+import {
+  normalizeStringEntries,
+  uniqueStrings,
+} from "@openclaw/normalization-core/string-normalization";
+import { Type } from "typebox";
+import { formatErrorMessage } from "../infra/errors.js";
+import { getEnvApiKey } from "../llm/env-api-keys.js";
+import type { OpenAICompletionsOptions } from "../llm/providers/openai-completions.js";
+import { complete } from "../llm/stream.js";
+import type { Context, Model, Tool } from "../llm/types.js";
+import { inferParamBFromIdOrName } from "../shared/model-param-b.js";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const DEFAULT_TIMEOUT_MS = 12_000;
@@ -45,7 +55,7 @@ type OpenRouterModelPricing = {
   internalReasoning: number;
 };
 
-export type ProbeResult = {
+type ProbeResult = {
   ok: boolean;
   latencyMs: number | null;
   error?: string;
@@ -70,7 +80,7 @@ export type ModelScanResult = {
   image: ProbeResult;
 };
 
-export type OpenRouterScanOptions = {
+type OpenRouterScanOptions = {
   apiKey?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -85,46 +95,48 @@ export type OpenRouterScanOptions = {
 type OpenAIModel = Model<"openai-completions">;
 
 function normalizeCreatedAtMs(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  if (value <= 0) return null;
-  if (value > 1e12) return Math.round(value);
-  return Math.round(value * 1000);
-}
-
-function inferParamBFromIdOrName(text: string): number | null {
-  const raw = text.toLowerCase();
-  const matches = raw.matchAll(/(?:^|[^a-z0-9])[a-z]?(\d+(?:\.\d+)?)b(?:[^a-z0-9]|$)/g);
-  let best: number | null = null;
-  for (const match of matches) {
-    const numRaw = match[1];
-    if (!numRaw) continue;
-    const value = Number(numRaw);
-    if (!Number.isFinite(value) || value <= 0) continue;
-    if (best === null || value > best) best = value;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
   }
-  return best;
+  if (value <= 0) {
+    return null;
+  }
+  const timestampMs = value > 1e12 ? Math.round(value) : Math.round(value * 1000);
+  return asDateTimestampMs(timestampMs) ?? null;
 }
 
 function parseModality(modality: string | null): Array<"text" | "image"> {
-  if (!modality) return ["text"];
-  const normalized = modality.toLowerCase();
+  if (!modality) {
+    return ["text"];
+  }
+  const normalized = normalizeLowercaseStringOrEmpty(modality);
   const parts = normalized.split(/[^a-z]+/).filter(Boolean);
   const hasImage = parts.includes("image");
   return hasImage ? ["text", "image"] : ["text"];
 }
 
 function parseNumberString(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
   const trimmed = value.trim();
-  if (!trimmed) return null;
+  if (!trimmed) {
+    return null;
+  }
   const num = Number(trimmed);
-  if (!Number.isFinite(num)) return null;
+  if (!Number.isFinite(num)) {
+    return null;
+  }
   return num;
 }
 
 function parseOpenRouterPricing(value: unknown): OpenRouterModelPricing | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object") {
+    return null;
+  }
   const obj = value as Record<string, unknown>;
   const prompt = parseNumberString(obj.prompt);
   const completion = parseNumberString(obj.completion);
@@ -133,7 +145,9 @@ function parseOpenRouterPricing(value: unknown): OpenRouterModelPricing | null {
   const webSearch = parseNumberString(obj.web_search) ?? 0;
   const internalReasoning = parseNumberString(obj.internal_reasoning) ?? 0;
 
-  if (prompt === null || completion === null) return null;
+  if (prompt === null || completion === null) {
+    return null;
+  }
   return {
     prompt,
     completion,
@@ -145,8 +159,12 @@ function parseOpenRouterPricing(value: unknown): OpenRouterModelPricing | null {
 }
 
 function isFreeOpenRouterModel(entry: OpenRouterModelMeta): boolean {
-  if (entry.id.endsWith(":free")) return true;
-  if (!entry.pricing) return false;
+  if (entry.id.endsWith(":free")) {
+    return true;
+  }
+  if (!entry.pricing) {
+    return false;
+  }
   return entry.pricing.prompt === 0 && entry.pricing.completion === 0;
 }
 
@@ -155,7 +173,7 @@ async function withTimeout<T>(
   fn: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(controller.abort.bind(controller), timeoutMs);
   try {
     return await fn(controller.signal);
   } finally {
@@ -163,10 +181,16 @@ async function withTimeout<T>(
   }
 }
 
-async function fetchOpenRouterModels(fetchImpl: typeof fetch): Promise<OpenRouterModelMeta[]> {
-  const res = await fetchImpl(OPENROUTER_MODELS_URL, {
-    headers: { Accept: "application/json" },
-  });
+async function fetchOpenRouterModels(
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<OpenRouterModelMeta[]> {
+  const res = await withTimeout(timeoutMs, (signal) =>
+    fetchImpl(OPENROUTER_MODELS_URL, {
+      headers: { Accept: "application/json" },
+      signal,
+    }),
+  );
   if (!res.ok) {
     throw new Error(`OpenRouter /models failed: HTTP ${res.status}`);
   }
@@ -175,10 +199,14 @@ async function fetchOpenRouterModels(fetchImpl: typeof fetch): Promise<OpenRoute
 
   return entries
     .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
       const obj = entry as Record<string, unknown>;
-      const id = typeof obj.id === "string" ? obj.id.trim() : "";
-      if (!id) return null;
+      const id = normalizeOptionalString(obj.id) ?? "";
+      if (!id) {
+        return null;
+      }
       const name = typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : id;
 
       const contextLength =
@@ -194,10 +222,9 @@ async function fetchOpenRouterModels(fetchImpl: typeof fetch): Promise<OpenRoute
             : null;
 
       const supportedParameters = Array.isArray(obj.supported_parameters)
-        ? obj.supported_parameters
-            .filter((value): value is string => typeof value === "string")
-            .map((value) => value.trim())
-            .filter(Boolean)
+        ? normalizeStringEntries(
+            obj.supported_parameters.filter((value) => typeof value === "string"),
+          )
         : [];
 
       const supportedParametersCount = supportedParameters.length;
@@ -247,7 +274,7 @@ async function probeTool(
     const message = await withTimeout(timeoutMs, (signal) =>
       complete(model, context, {
         apiKey,
-        maxTokens: 32,
+        maxTokens: 256,
         temperature: 0,
         toolChoice: "required",
         signal,
@@ -268,7 +295,7 @@ async function probeTool(
     return {
       ok: false,
       latencyMs: Date.now() - startedAt,
-      error: err instanceof Error ? err.message : String(err),
+      error: formatErrorMessage(err),
     };
   }
 }
@@ -305,16 +332,44 @@ async function probeImage(
     return {
       ok: false,
       latencyMs: Date.now() - startedAt,
-      error: err instanceof Error ? err.message : String(err),
+      error: formatErrorMessage(err),
     };
   }
 }
 
 function ensureImageInput(model: OpenAIModel): OpenAIModel {
-  if (model.input.includes("image")) return model;
+  if (model.input?.includes("image")) {
+    return model;
+  }
   return {
     ...model,
-    input: Array.from(new Set([...model.input, "image"])),
+    input: uniqueStrings([...(model.input ?? []), "image"]) as OpenAIModel["input"],
+  };
+}
+
+function buildOpenRouterScanResult(params: {
+  entry: OpenRouterModelMeta;
+  isFree: boolean;
+  tool: ProbeResult;
+  image: ProbeResult;
+}): ModelScanResult {
+  const { entry, isFree } = params;
+  return {
+    id: entry.id,
+    name: entry.name,
+    provider: "openrouter",
+    modelRef: `openrouter/${entry.id}`,
+    contextLength: entry.contextLength,
+    maxCompletionTokens: entry.maxCompletionTokens,
+    supportedParametersCount: entry.supportedParametersCount,
+    supportsToolsMeta: entry.supportsToolsMeta,
+    modality: entry.modality,
+    inferredParamB: entry.inferredParamB,
+    createdAtMs: entry.createdAtMs,
+    pricing: entry.pricing,
+    isFree,
+    tool: params.tool,
+    image: params.image,
   };
 }
 
@@ -325,7 +380,7 @@ async function mapWithConcurrency<T, R>(
   opts?: { onProgress?: (completed: number, total: number) => void },
 ): Promise<R[]> {
   const limit = Math.max(1, Math.floor(concurrency));
-  const results = Array.from({ length: items.length }) as R[];
+  const results: R[] = Array.from({ length: items.length }, () => undefined as R);
   let nextIndex = 0;
   let completed = 0;
 
@@ -333,8 +388,10 @@ async function mapWithConcurrency<T, R>(
     while (true) {
       const current = nextIndex;
       nextIndex += 1;
-      if (current >= items.length) return;
-      results[current] = await fn(items[current] as T, current);
+      if (current >= items.length) {
+        return;
+      }
+      results[current] = await fn(items[current], current);
       completed += 1;
       opts?.onProgress?.(completed, items.length);
     }
@@ -356,37 +413,58 @@ export async function scanOpenRouterModels(
   const probe = options.probe ?? true;
   const apiKey = options.apiKey?.trim() || getEnvApiKey("openrouter") || "";
   if (probe && !apiKey) {
-    throw new Error("Missing OpenRouter API key. Set OPENROUTER_API_KEY to run models scan.");
+    throw new Error(
+      "Missing OpenRouter API key. Free OpenRouter models still require OPENROUTER_API_KEY for live probes and inference; call with probe:false to list public catalog metadata.",
+    );
   }
 
-  const timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+  const timeoutMs = resolveTimerTimeoutMs(options.timeoutMs, DEFAULT_TIMEOUT_MS);
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_CONCURRENCY));
   const minParamB = Math.max(0, Math.floor(options.minParamB ?? 0));
   const maxAgeDays = Math.max(0, Math.floor(options.maxAgeDays ?? 0));
-  const providerFilter = options.providerFilter?.trim().toLowerCase() ?? "";
+  const providerFilter = normalizeProviderId(options.providerFilter ?? "");
 
-  const catalog = await fetchOpenRouterModels(fetchImpl);
+  const catalog = await fetchOpenRouterModels(fetchImpl, timeoutMs);
   const now = Date.now();
 
   const filtered = catalog.filter((entry) => {
-    if (!isFreeOpenRouterModel(entry)) return false;
+    if (!isFreeOpenRouterModel(entry)) {
+      return false;
+    }
     if (providerFilter) {
-      const prefix = entry.id.split("/")[0]?.toLowerCase() ?? "";
-      if (prefix !== providerFilter) return false;
+      const prefix = normalizeProviderId(entry.id.split("/")[0] ?? "");
+      if (prefix !== providerFilter) {
+        return false;
+      }
     }
     if (minParamB > 0) {
       const params = entry.inferredParamB ?? 0;
-      if (params < minParamB) return false;
+      if (params < minParamB) {
+        return false;
+      }
     }
     if (maxAgeDays > 0 && entry.createdAtMs) {
       const ageMs = now - entry.createdAtMs;
       const ageDays = ageMs / (24 * 60 * 60 * 1000);
-      if (ageDays > maxAgeDays) return false;
+      if (ageDays > maxAgeDays) {
+        return false;
+      }
     }
     return true;
   });
 
-  const baseModel = getModel("openrouter", "openrouter/auto") as OpenAIModel;
+  const baseModel: OpenAIModel = {
+    id: "openrouter/auto",
+    name: "OpenRouter Auto",
+    api: "openai-completions",
+    provider: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    reasoning: false,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
 
   options.onProgress?.({
     phase: "probe",
@@ -400,23 +478,12 @@ export async function scanOpenRouterModels(
     async (entry) => {
       const isFree = isFreeOpenRouterModel(entry);
       if (!probe) {
-        return {
-          id: entry.id,
-          name: entry.name,
-          provider: "openrouter",
-          modelRef: `openrouter/${entry.id}`,
-          contextLength: entry.contextLength,
-          maxCompletionTokens: entry.maxCompletionTokens,
-          supportedParametersCount: entry.supportedParametersCount,
-          supportsToolsMeta: entry.supportsToolsMeta,
-          modality: entry.modality,
-          inferredParamB: entry.inferredParamB,
-          createdAtMs: entry.createdAtMs,
-          pricing: entry.pricing,
+        return buildOpenRouterScanResult({
+          entry,
           isFree,
           tool: { ok: false, latencyMs: null, skipped: true },
           image: { ok: false, latencyMs: null, skipped: true },
-        } satisfies ModelScanResult;
+        });
       }
 
       const model: OpenAIModel = {
@@ -430,27 +497,16 @@ export async function scanOpenRouterModels(
       };
 
       const toolResult = await probeTool(model, apiKey, timeoutMs);
-      const imageResult = model.input.includes("image")
+      const imageResult = model.input?.includes("image")
         ? await probeImage(ensureImageInput(model), apiKey, timeoutMs)
         : { ok: false, latencyMs: null, skipped: true };
 
-      return {
-        id: entry.id,
-        name: entry.name,
-        provider: "openrouter",
-        modelRef: `openrouter/${entry.id}`,
-        contextLength: entry.contextLength,
-        maxCompletionTokens: entry.maxCompletionTokens,
-        supportedParametersCount: entry.supportedParametersCount,
-        supportsToolsMeta: entry.supportsToolsMeta,
-        modality: entry.modality,
-        inferredParamB: entry.inferredParamB,
-        createdAtMs: entry.createdAtMs,
-        pricing: entry.pricing,
+      return buildOpenRouterScanResult({
+        entry,
         isFree,
         tool: toolResult,
         image: imageResult,
-      } satisfies ModelScanResult;
+      });
     },
     {
       onProgress: (completed, total) =>
@@ -462,6 +518,3 @@ export async function scanOpenRouterModels(
     },
   );
 }
-
-export { OPENROUTER_MODELS_URL };
-export type { OpenRouterModelMeta, OpenRouterModelPricing };

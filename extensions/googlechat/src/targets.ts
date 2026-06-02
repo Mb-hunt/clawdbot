@@ -1,33 +1,42 @@
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
 import { findGoogleChatDirectMessage } from "./api.js";
 
 export function normalizeGoogleChatTarget(raw?: string | null): string | undefined {
   const trimmed = raw?.trim();
-  if (!trimmed) return undefined;
+  if (!trimmed) {
+    return undefined;
+  }
   const withoutPrefix = trimmed.replace(/^(googlechat|google-chat|gchat):/i, "");
   const normalized = withoutPrefix
     .replace(/^user:(users\/)?/i, "users/")
     .replace(/^space:(spaces\/)?/i, "spaces/");
   if (isGoogleChatUserTarget(normalized)) {
     const suffix = normalized.slice("users/".length);
-    return suffix.includes("@") ? `users/${suffix.toLowerCase()}` : normalized;
+    return suffix.includes("@") ? `users/${normalizeLowercaseStringOrEmpty(suffix)}` : normalized;
   }
-  if (isGoogleChatSpaceTarget(normalized)) return normalized;
-  if (normalized.includes("@")) return `users/${normalized.toLowerCase()}`;
+  if (isGoogleChatSpaceTarget(normalized)) {
+    return normalized;
+  }
+  if (normalized.includes("@")) {
+    return `users/${normalizeLowercaseStringOrEmpty(normalized)}`;
+  }
   return normalized;
 }
 
 export function isGoogleChatUserTarget(value: string): boolean {
-  return value.toLowerCase().startsWith("users/");
+  return normalizeLowercaseStringOrEmpty(value).startsWith("users/");
 }
 
 export function isGoogleChatSpaceTarget(value: string): boolean {
-  return value.toLowerCase().startsWith("spaces/");
+  return normalizeLowercaseStringOrEmpty(value).startsWith("spaces/");
 }
 
 function stripMessageSuffix(target: string): string {
   const index = target.indexOf("/messages/");
-  if (index === -1) return target;
+  if (index === -1) {
+    return target;
+  }
   return target.slice(0, index);
 }
 
@@ -40,7 +49,9 @@ export async function resolveGoogleChatOutboundSpace(params: {
     throw new Error("Missing Google Chat target.");
   }
   const base = stripMessageSuffix(normalized);
-  if (isGoogleChatSpaceTarget(base)) return base;
+  if (isGoogleChatSpaceTarget(base)) {
+    return base;
+  }
   if (isGoogleChatUserTarget(base)) {
     const dm = await findGoogleChatDirectMessage({
       account: params.account,

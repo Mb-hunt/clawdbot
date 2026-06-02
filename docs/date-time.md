@@ -3,19 +3,18 @@ summary: "Date and time handling across envelopes, prompts, tools, and connector
 read_when:
   - You are changing how timestamps are shown to the model or users
   - You are debugging time formatting in messages or system prompt output
+title: "Date and time"
 ---
 
-# Date & Time
-
-Moltbot defaults to **host-local time for transport timestamps** and **user timezone only in the system prompt**.
+OpenClaw defaults to **host-local time for transport timestamps** and **user timezone only in the system prompt**.
 Provider timestamps are preserved so tools keep their native semantics (current time is available via `session_status`).
 
 ## Message envelopes (local by default)
 
-Inbound messages are wrapped with a timestamp (minute precision):
+Inbound messages are wrapped with a timestamp (second precision):
 
 ```
-[Provider ... 2026-01-05 16:26 PST] message text
+[Provider ... Mon 2026-01-05 16:26:34 PST] message text
 ```
 
 This envelope timestamp is **host-local by default**, regardless of the provider timezone.
@@ -28,9 +27,9 @@ You can override this behavior:
     defaults: {
       envelopeTimezone: "local", // "utc" | "local" | "user" | IANA timezone
       envelopeTimestamp: "on", // "on" | "off"
-      envelopeElapsed: "on" // "on" | "off"
-    }
-  }
+      envelopeElapsed: "on", // "on" | "off"
+    },
+  },
 }
 ```
 
@@ -46,22 +45,22 @@ You can override this behavior:
 **Local (default):**
 
 ```
-[WhatsApp +1555 2026-01-18 00:19 PST] hello
+[WhatsApp +1555 Sun 2026-01-18 00:19:42 PST] hello
 ```
 
 **User timezone:**
 
 ```
-[WhatsApp +1555 2026-01-18 00:19 CST] hello
+[WhatsApp +1555 Sun 2026-01-18 00:19:42 CST] hello
 ```
 
 **Elapsed time enabled:**
 
 ```
-[WhatsApp +1555 +30s 2026-01-18T05:19Z] follow-up
+[WhatsApp +1555 +30s Sun 2026-01-18T05:19:00Z] follow-up
 ```
 
-## System prompt: Current Date & Time
+## System prompt: current date and time
 
 If the user timezone is known, the system prompt includes a dedicated
 **Current Date & Time** section with the **time zone only** (no clock/time format)
@@ -90,9 +89,9 @@ System: [2026-01-12 12:19:17 PST] Model switched.
   agents: {
     defaults: {
       userTimezone: "America/Chicago",
-      timeFormat: "auto" // auto | 12 | 24
-    }
-  }
+      timeFormat: "auto", // auto | 12 | 24
+    },
+  },
 }
 ```
 
@@ -101,7 +100,7 @@ System: [2026-01-12 12:19:17 PST] Model switched.
 
 ## Time format detection (auto)
 
-When `timeFormat: "auto"`, Moltbot inspects the OS preference (macOS/Windows)
+When `timeFormat: "auto"`, OpenClaw inspects the OS preference (macOS/Windows)
 and falls back to locale formatting. The detected value is **cached per process**
 to avoid repeated system calls.
 

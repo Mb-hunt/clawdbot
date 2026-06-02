@@ -1,8 +1,25 @@
 ---
 name: 1password
-description: Set up and use 1Password CLI (op). Use when installing the CLI, enabling desktop app integration, signing in (single or multi-account), or reading/injecting/running secrets via op.
+description: "Set up and use 1Password CLI for sign-in, desktop integration, and reading or injecting secrets."
 homepage: https://developer.1password.com/docs/cli/get-started/
-metadata: {"moltbot":{"emoji":"🔐","requires":{"bins":["op"]},"install":[{"id":"brew","kind":"brew","formula":"1password-cli","bins":["op"],"label":"Install 1Password CLI (brew)"}]}}
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "🔐",
+        "requires": { "bins": ["op"] },
+        "install":
+          [
+            {
+              "id": "brew",
+              "kind": "brew",
+              "formula": "1password-cli",
+              "bins": ["op"],
+              "label": "Install 1Password CLI (brew)",
+            },
+          ],
+      },
+  }
 ---
 
 # 1Password CLI
@@ -24,16 +41,16 @@ Follow the official CLI get-started steps. Don't guess install commands.
 6. Verify access inside tmux: `op whoami` (must succeed before any secret read).
 7. If multiple accounts: use `--account` or `OP_ACCOUNT`.
 
-## REQUIRED tmux session (T-Max)
+## REQUIRED tmux session (tmux)
 
 The shell tool uses a fresh TTY per command. To avoid re-prompts and failures, always run `op` inside a dedicated tmux session with a fresh socket/session name.
 
 Example (see `tmux` skill for socket conventions, do not reuse old session names):
 
 ```bash
-SOCKET_DIR="${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/moltbot-tmux-sockets}"
+SOCKET_DIR="${OPENCLAW_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/openclaw-tmux-sockets}"
 mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/moltbot-op.sock"
+SOCKET="$SOCKET_DIR/openclaw-op.sock"
 SESSION="op-auth-$(date +%Y%m%d-%H%M%S)"
 
 tmux -S "$SOCKET" new -d -s "$SESSION" -n shell

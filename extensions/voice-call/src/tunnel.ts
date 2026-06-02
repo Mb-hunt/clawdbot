@@ -1,11 +1,17 @@
 import { spawn } from "node:child_process";
+import {
+  appendBoundedChildOutput,
+  emptyBoundedChildOutput,
+  formatBoundedChildOutput,
+} from "./bounded-child-output.js";
+import { getTailscaleDnsName } from "./webhook/tailscale.js";
 
-import { getTailscaleDnsName } from "./webhook.js";
+const NGROK_LOG_BUFFER_MAX_CHARS = 16_384;
 
 /**
  * Tunnel configuration for exposing the webhook server.
  */
-export interface TunnelConfig {
+interface TunnelConfig {
   /** Tunnel provider: ngrok, tailscale-serve, or tailscale-funnel */
   provider: "ngrok" | "tailscale-serve" | "tailscale-funnel" | "none";
   /** Local port to tunnel */
@@ -52,14 +58,7 @@ export async function startNgrokTunnel(config: {
   }
 
   // Build ngrok command args
-  const args = [
-    "http",
-    String(config.port),
-    "--log",
-    "stdout",
-    "--log-format",
-    "json",
-  ];
+  const args = ["http", String(config.port), "--log", "stdout", "--log-format", "json"];
 
   // Add custom domain if provided (paid ngrok feature)
   if (config.domain) {
@@ -125,9 +124,11 @@ export async function startNgrokTunnel(config: {
     };
 
     proc.stdout.on("data", (data: Buffer) => {
-      outputBuffer += data.toString();
-      const lines = outputBuffer.split("\n");
+      const lines = (outputBuffer + data.toString()).split("\n");
       outputBuffer = lines.pop() || "";
+      if (outputBuffer.length > NGROK_LOG_BUFFER_MAX_CHARS) {
+        outputBuffer = outputBuffer.slice(-NGROK_LOG_BUFFER_MAX_CHARS);
+      }
 
       for (const line of lines) {
         if (line.trim()) {
@@ -143,7 +144,8 @@ export async function startNgrokTunnel(config: {
         if (!resolved) {
           resolved = true;
           clearTimeout(timeout);
-          reject(new Error(`ngrok error: ${msg}`));
+          const output = appendBoundedChildOutput(emptyBoundedChildOutput(), msg);
+          reject(new Error(`ngrok error: ${formatBoundedChildOutput(output)}`));
         }
       }
     });
@@ -175,21 +177,22 @@ async function runNgrokCommand(args: string[]): Promise<string> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
+    let stdout = emptyBoundedChildOutput();
+    let stderr = emptyBoundedChildOutput();
 
     proc.stdout.on("data", (data) => {
-      stdout += data.toString();
+      stdout = appendBoundedChildOutput(stdout, data.toString());
     });
     proc.stderr.on("data", (data) => {
-      stderr += data.toString();
+      stderr = appendBoundedChildOutput(stderr, data.toString());
     });
 
     proc.on("close", (code) => {
       if (code === 0) {
-        resolve(stdout);
+        resolve(stdout.text);
       } else {
-        reject(new Error(`ngrok command failed: ${stderr || stdout}`));
+        const output = stderr.text ? stderr : stdout;
+        reject(new Error(`ngrok command failed: ${formatBoundedChildOutput(output)}`));
       }
     });
 
@@ -203,7 +206,7 @@ async function runNgrokCommand(args: string[]): Promise<string> {
 export async function isNgrokAvailable(): Promise<boolean> {
   return new Promise((resolve) => {
     const proc = spawn("ngrok", ["version"], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: "ignore",
     });
 
     proc.on("close", (code) => {
@@ -234,24 +237,29 @@ export async function startTailscaleTunnel(config: {
   const localUrl = `http://127.0.0.1:${config.port}${path}`;
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      "tailscale",
-      [config.mode, "--bg", "--yes", "--set-path", path, localUrl],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const proc = spawn("tailscale", [config.mode, "--bg", "--yes", "--set-path", path, localUrl], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = emptyBoundedChildOutput();
+    let stderr = emptyBoundedChildOutput();
 
     const timeout = setTimeout(() => {
       proc.kill("SIGKILL");
       reject(new Error(`Tailscale ${config.mode} timed out`));
     }, 10000);
 
+    proc.stdout.on("data", (data) => {
+      stdout = appendBoundedChildOutput(stdout, data.toString());
+    });
+    proc.stderr.on("data", (data) => {
+      stderr = appendBoundedChildOutput(stderr, data.toString());
+    });
+
     proc.on("close", (code) => {
       clearTimeout(timeout);
       if (code === 0) {
         const publicUrl = `https://${dnsName}${path}`;
-        console.log(
-          `[voice-call] Tailscale ${config.mode} active: ${publicUrl}`,
-        );
+        console.log(`[voice-call] Tailscale ${config.mode} active: ${publicUrl}`);
 
         resolve({
           publicUrl,
@@ -261,7 +269,9 @@ export async function startTailscaleTunnel(config: {
           },
         });
       } else {
-        reject(new Error(`Tailscale ${config.mode} failed with code ${code}`));
+        const output = stderr.text ? stderr : stdout;
+        const detail = output.text ? `: ${formatBoundedChildOutput(output)}` : "";
+        reject(new Error(`Tailscale ${config.mode} failed with code ${code}${detail}`));
       }
     });
 
@@ -275,10 +285,7 @@ export async function startTailscaleTunnel(config: {
 /**
  * Stop a Tailscale serve/funnel tunnel.
  */
-async function stopTailscaleTunnel(
-  mode: "serve" | "funnel",
-  path: string,
-): Promise<void> {
+async function stopTailscaleTunnel(mode: "serve" | "funnel", path: string): Promise<void> {
   return new Promise((resolve) => {
     const proc = spawn("tailscale", [mode, "off", path], {
       stdio: "ignore",
@@ -299,9 +306,7 @@ async function stopTailscaleTunnel(
 /**
  * Start a tunnel based on configuration.
  */
-export async function startTunnel(
-  config: TunnelConfig,
-): Promise<TunnelResult | null> {
+export async function startTunnel(config: TunnelConfig): Promise<TunnelResult | null> {
   switch (config.provider) {
     case "ngrok":
       return startNgrokTunnel({

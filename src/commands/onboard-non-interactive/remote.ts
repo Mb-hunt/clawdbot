@@ -1,39 +1,52 @@
-import type { MoltbotConfig } from "../../config/config.js";
-import { writeConfigFile } from "../../config/config.js";
-import { logConfigUpdated } from "../../config/logging.js";
-import type { RuntimeEnv } from "../../runtime.js";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { formatCliCommand } from "../../cli/command-format.js";
+import { logConfigUpdated } from "../../config/logging.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { type RuntimeEnv, writeRuntimeJson } from "../../runtime.js";
+import { applySkipBootstrapConfig } from "../onboard-config.js";
 import { applyWizardMetadata } from "../onboard-helpers.js";
 import type { OnboardOptions } from "../onboard-types.js";
+import { commitNonInteractiveOnboardConfig } from "./config-write.js";
 
-export async function runNonInteractiveOnboardingRemote(params: {
+export async function runNonInteractiveRemoteSetup(params: {
   opts: OnboardOptions;
   runtime: RuntimeEnv;
-  baseConfig: MoltbotConfig;
+  baseConfig: OpenClawConfig;
+  baseHash?: string;
 }) {
-  const { opts, runtime, baseConfig } = params;
+  const { opts, runtime, baseConfig, baseHash } = params;
   const mode = "remote" as const;
 
-  const remoteUrl = opts.remoteUrl?.trim();
+  const remoteUrl = normalizeOptionalString(opts.remoteUrl);
   if (!remoteUrl) {
-    runtime.error("Missing --remote-url for remote mode.");
+    runtime.error(
+      `Missing --remote-url for remote mode. Example: ${formatCliCommand("openclaw onboard --non-interactive --mode remote --remote-url ws://127.0.0.1:3000")}.`,
+    );
     runtime.exit(1);
     return;
   }
 
-  let nextConfig: MoltbotConfig = {
+  let nextConfig: OpenClawConfig = {
     ...baseConfig,
     gateway: {
       ...baseConfig.gateway,
       mode: "remote",
       remote: {
         url: remoteUrl,
-        token: opts.remoteToken?.trim() || undefined,
+        token: normalizeOptionalString(opts.remoteToken),
       },
     },
   };
+  if (opts.skipBootstrap) {
+    nextConfig = applySkipBootstrapConfig(nextConfig);
+  }
   nextConfig = applyWizardMetadata(nextConfig, { command: "onboard", mode });
-  await writeConfigFile(nextConfig);
+  await commitNonInteractiveOnboardConfig({
+    nextConfig,
+    baseConfig,
+    baseHash,
+    reset: opts.reset,
+  });
   logConfigUpdated(runtime);
 
   const payload = {
@@ -42,12 +55,12 @@ export async function runNonInteractiveOnboardingRemote(params: {
     auth: opts.remoteToken ? "token" : "none",
   };
   if (opts.json) {
-    runtime.log(JSON.stringify(payload, null, 2));
+    writeRuntimeJson(runtime, payload);
   } else {
     runtime.log(`Remote gateway: ${remoteUrl}`);
     runtime.log(`Auth: ${payload.auth}`);
     runtime.log(
-      `Tip: run \`${formatCliCommand("moltbot configure --section web")}\` to store your Brave API key for web_search. Docs: https://docs.molt.bot/tools/web`,
+      `Tip: run \`${formatCliCommand("openclaw configure --section web")}\` to store your Brave API key for web_search. Docs: https://docs.openclaw.ai/tools/web`,
     );
   }
 }

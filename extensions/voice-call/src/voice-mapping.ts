@@ -1,6 +1,4 @@
-/**
- * Voice mapping and XML utilities for voice call providers.
- */
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 /**
  * Escape XML special characters for TwiML and other XML responses.
@@ -39,7 +37,9 @@ export const DEFAULT_POLLY_VOICE = "Polly.Joanna";
  * @returns Polly voice name suitable for Twilio TwiML
  */
 export function mapVoiceToPolly(voice: string | undefined): string {
-  if (!voice) return DEFAULT_POLLY_VOICE;
+  if (!voice) {
+    return DEFAULT_POLLY_VOICE;
+  }
 
   // Already a Polly/Google voice - pass through
   if (voice.startsWith("Polly.") || voice.startsWith("Google.")) {
@@ -47,14 +47,14 @@ export function mapVoiceToPolly(voice: string | undefined): string {
   }
 
   // Map OpenAI voices to Polly equivalents
-  return OPENAI_TO_POLLY_MAP[voice.toLowerCase()] || DEFAULT_POLLY_VOICE;
+  return OPENAI_TO_POLLY_MAP[normalizeLowercaseStringOrEmpty(voice)] || DEFAULT_POLLY_VOICE;
 }
 
 /**
  * Check if a voice name is a known OpenAI voice.
  */
 export function isOpenAiVoice(voice: string): boolean {
-  return voice.toLowerCase() in OPENAI_TO_POLLY_MAP;
+  return normalizeLowercaseStringOrEmpty(voice) in OPENAI_TO_POLLY_MAP;
 }
 
 /**

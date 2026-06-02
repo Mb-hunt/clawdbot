@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import * as readline from "node:readline";
 import { Readable, Writable } from "node:stream";
-
+import { fileURLToPath } from "node:url";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
@@ -9,10 +11,17 @@ import {
   type RequestPermissionRequest,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
+import {
+  buildAcpClientStripKeys,
+  resolveAcpClientSpawnEnv,
+  resolveAcpClientSpawnInvocation,
+  resolvePermissionRequest,
+  shouldStripProviderAuthEnvVarsForAcpServer,
+} from "./client-helpers.js";
 
-import { ensureMoltbotCliOnPath } from "../infra/path-env.js";
-
-export type AcpClientOptions = {
+type AcpClientOptions = {
   cwd?: string;
   serverCommand?: string;
   serverArgs?: string[];
@@ -20,14 +29,16 @@ export type AcpClientOptions = {
   verbose?: boolean;
 };
 
-export type AcpClientHandle = {
+type AcpClientHandle = {
   client: ClientSideConnection;
   agent: ChildProcess;
   sessionId: string;
 };
 
 function toArgs(value: string[] | string | undefined): string[] {
-  if (!value) return [];
+  if (!value) {
+    return [];
+  }
   return Array.isArray(value) ? value : [value];
 }
 
@@ -39,9 +50,30 @@ function buildServerArgs(opts: AcpClientOptions): string[] {
   return args;
 }
 
+function resolveSelfEntryPath(): string | null {
+  // Prefer a path relative to the built module location (dist/acp/client.js -> dist/entry.js).
+  try {
+    const here = fileURLToPath(import.meta.url);
+    const candidate = path.resolve(path.dirname(here), "..", "entry.js");
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  } catch {
+    // ignore
+  }
+
+  const argv1 = normalizeOptionalString(process.argv[1]);
+  if (argv1) {
+    return path.isAbsolute(argv1) ? argv1 : path.resolve(process.cwd(), argv1);
+  }
+  return null;
+}
+
 function printSessionUpdate(notification: SessionNotification): void {
   const update = notification.update;
-  if (!("sessionUpdate" in update)) return;
+  if (!("sessionUpdate" in update)) {
+    return;
+  }
 
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
@@ -62,28 +94,56 @@ function printSessionUpdate(notification: SessionNotification): void {
     }
     case "available_commands_update": {
       const names = update.availableCommands?.map((cmd) => `/${cmd.name}`).join(" ");
-      if (names) console.log(`\n[commands] ${names}`);
-      return;
+      if (names) {
+        console.log(`\n[commands] ${names}`);
+      }
     }
     default:
-      return;
   }
 }
 
-export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpClientHandle> {
+async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpClientHandle> {
   const cwd = opts.cwd ?? process.cwd();
   const verbose = Boolean(opts.verbose);
   const log = verbose ? (msg: string) => console.error(`[acp-client] ${msg}`) : () => {};
 
-  ensureMoltbotCliOnPath({ cwd });
-  const serverCommand = opts.serverCommand ?? "moltbot";
+  ensureOpenClawCliOnPath();
   const serverArgs = buildServerArgs(opts);
 
-  log(`spawning: ${serverCommand} ${serverArgs.join(" ")}`);
+  const entryPath = resolveSelfEntryPath();
+  const defaultServerCommand = entryPath ? process.execPath : "openclaw";
+  const defaultServerArgs = entryPath ? [entryPath, ...serverArgs] : serverArgs;
+  const serverCommand = opts.serverCommand ?? defaultServerCommand;
+  const effectiveArgs = opts.serverCommand || !entryPath ? serverArgs : defaultServerArgs;
+  const { getActiveSkillEnvKeys } = await import("../skills/runtime/env-overrides.runtime.js");
+  const stripProviderAuthEnvVars = shouldStripProviderAuthEnvVarsForAcpServer({
+    serverCommand,
+    serverArgs: effectiveArgs,
+    defaultServerCommand,
+    defaultServerArgs,
+  });
+  const stripKeys = buildAcpClientStripKeys({
+    stripProviderAuthEnvVars,
+    activeSkillEnvKeys: getActiveSkillEnvKeys(),
+  });
+  const spawnEnv = resolveAcpClientSpawnEnv(process.env, { stripKeys });
+  const spawnInvocation = resolveAcpClientSpawnInvocation(
+    { serverCommand, serverArgs: effectiveArgs },
+    {
+      platform: process.platform,
+      env: spawnEnv,
+      execPath: process.execPath,
+    },
+  );
 
-  const agent = spawn(serverCommand, serverArgs, {
+  log(`spawning: ${spawnInvocation.command} ${spawnInvocation.args.join(" ")}`);
+
+  const agent = spawn(spawnInvocation.command, spawnInvocation.args, {
     stdio: ["pipe", "pipe", "inherit"],
     cwd,
+    env: spawnEnv,
+    shell: spawnInvocation.shell,
+    windowsHide: spawnInvocation.windowsHide,
   });
 
   if (!agent.stdin || !agent.stdout) {
@@ -100,16 +160,7 @@ export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpC
         printSessionUpdate(params);
       },
       requestPermission: async (params: RequestPermissionRequest) => {
-        console.log("\n[permission requested]", params.toolCall?.title ?? "tool");
-        const options = params.options ?? [];
-        const allowOnce = options.find((option) => option.kind === "allow_once");
-        const fallback = options[0];
-        return {
-          outcome: {
-            outcome: "selected",
-            optionId: allowOnce?.optionId ?? fallback?.optionId ?? "allow",
-          },
-        };
+        return resolvePermissionRequest(params, { cwd });
       },
     }),
     stream,
@@ -122,7 +173,7 @@ export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpC
       fs: { readTextFile: true, writeTextFile: true },
       terminal: true,
     },
-    clientInfo: { name: "moltbot-acp-client", version: "1.0.0" },
+    clientInfo: { name: "openclaw-acp-client", version: "1.0.0" },
   });
 
   log("creating session");
@@ -146,34 +197,36 @@ export async function runAcpClientInteractive(opts: AcpClientOptions = {}): Prom
     output: process.stdout,
   });
 
-  console.log("Moltbot ACP client");
+  console.log("OpenClaw ACP client");
   console.log(`Session: ${sessionId}`);
   console.log('Type a prompt, or "exit" to quit.\n');
 
   const prompt = () => {
-    rl.question("> ", async (input) => {
-      const text = input.trim();
-      if (!text) {
+    rl.question("> ", (input) => {
+      void (async () => {
+        const text = input.trim();
+        if (!text) {
+          prompt();
+          return;
+        }
+        if (text === "exit" || text === "quit") {
+          agent.kill();
+          rl.close();
+          process.exit(0);
+        }
+
+        try {
+          const response = await client.prompt({
+            sessionId,
+            prompt: [{ type: "text", text }],
+          });
+          console.log(`\n[${response.stopReason}]\n`);
+        } catch (err) {
+          console.error(`\n[error] ${String(err)}\n`);
+        }
+
         prompt();
-        return;
-      }
-      if (text === "exit" || text === "quit") {
-        agent.kill();
-        rl.close();
-        process.exit(0);
-      }
-
-      try {
-        const response = await client.prompt({
-          sessionId,
-          prompt: [{ type: "text", text }],
-        });
-        console.log(`\n[${response.stopReason}]\n`);
-      } catch (err) {
-        console.error(`\n[error] ${String(err)}\n`);
-      }
-
-      prompt();
+      })();
     });
   };
 

@@ -1,21 +1,29 @@
 import type { Command } from "commander";
-import { callGateway } from "../gateway/call.js";
-import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-import { withProgress } from "./progress.js";
+import type {
+  GatewayClientMode,
+  GatewayClientName,
+} from "../../packages/gateway-protocol/src/client-info.js";
+import type { OperatorScope } from "../gateway/operator-scopes.js";
+import type { DeviceIdentity } from "../infra/device-identity.js";
+import { createLazyImportLoader } from "../shared/lazy-promise.js";
+import type { GatewayRpcOpts } from "./gateway-rpc.types.js";
+export type { GatewayRpcOpts } from "./gateway-rpc.types.js";
 
-export type GatewayRpcOpts = {
-  url?: string;
-  token?: string;
-  timeout?: string;
-  expectFinal?: boolean;
-  json?: boolean;
-};
+type GatewayRpcRuntimeModule = typeof import("./gateway-rpc.runtime.js");
+
+const gatewayRpcRuntimeLoader = createLazyImportLoader<GatewayRpcRuntimeModule>(
+  () => import("./gateway-rpc.runtime.js"),
+);
+
+async function loadGatewayRpcRuntime(): Promise<GatewayRpcRuntimeModule> {
+  return gatewayRpcRuntimeLoader.load();
+}
 
 export function addGatewayClientOptions(cmd: Command) {
   return cmd
     .option("--url <url>", "Gateway WebSocket URL (defaults to gateway.remote.url when configured)")
     .option("--token <token>", "Gateway token (if required)")
-    .option("--timeout <ms>", "Timeout in ms", "10000")
+    .option("--timeout <ms>", "Timeout in ms", "30000")
     .option("--expect-final", "Wait for final response (agent)", false);
 }
 
@@ -23,25 +31,15 @@ export async function callGatewayFromCli(
   method: string,
   opts: GatewayRpcOpts,
   params?: unknown,
-  extra?: { expectFinal?: boolean; progress?: boolean },
+  extra?: {
+    clientName?: GatewayClientName;
+    mode?: GatewayClientMode;
+    deviceIdentity?: DeviceIdentity | null;
+    expectFinal?: boolean;
+    progress?: boolean;
+    scopes?: OperatorScope[];
+  },
 ) {
-  const showProgress = extra?.progress ?? opts.json !== true;
-  return await withProgress(
-    {
-      label: `Gateway ${method}`,
-      indeterminate: true,
-      enabled: showProgress,
-    },
-    async () =>
-      await callGateway({
-        url: opts.url,
-        token: opts.token,
-        method,
-        params,
-        expectFinal: extra?.expectFinal ?? Boolean(opts.expectFinal),
-        timeoutMs: Number(opts.timeout ?? 10_000),
-        clientName: GATEWAY_CLIENT_NAMES.CLI,
-        mode: GATEWAY_CLIENT_MODES.CLI,
-      }),
-  );
+  const runtime = await loadGatewayRpcRuntime();
+  return await runtime.callGatewayFromCliRuntime(method, opts, params, extra);
 }

@@ -1,20 +1,54 @@
-import type { MoltbotPluginApi } from "clawdbot/plugin-sdk";
-import { emptyPluginConfigSchema } from "clawdbot/plugin-sdk";
+import {
+  defineBundledChannelEntry,
+  type OpenClawPluginCommandDefinition,
+  type OpenClawPluginApi,
+} from "openclaw/plugin-sdk/channel-entry-contract";
 
-import { linePlugin } from "./src/channel.js";
-import { registerLineCardCommand } from "./src/card-command.js";
-import { setLineRuntime } from "./src/runtime.js";
+type RegisteredLineCardCommand = OpenClawPluginCommandDefinition;
 
-const plugin = {
+let lineCardCommandPromise: Promise<RegisteredLineCardCommand> | null = null;
+
+async function loadLineCardCommand(api: OpenClawPluginApi): Promise<RegisteredLineCardCommand> {
+  lineCardCommandPromise ??= (async () => {
+    let registered: RegisteredLineCardCommand | null = null;
+    const { registerLineCardCommand } = await import("./src/card-command.js");
+    registerLineCardCommand({
+      ...api,
+      registerCommand(command: RegisteredLineCardCommand) {
+        registered = command;
+      },
+    });
+    if (!registered) {
+      throw new Error("LINE card command registration unavailable");
+    }
+    return registered;
+  })();
+  return await lineCardCommandPromise;
+}
+
+export default defineBundledChannelEntry({
   id: "line",
   name: "LINE",
   description: "LINE Messaging API channel plugin",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: MoltbotPluginApi) {
-    setLineRuntime(api.runtime);
-    api.registerChannel({ plugin: linePlugin });
-    registerLineCardCommand(api);
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./channel-plugin-api.js",
+    exportName: "linePlugin",
   },
-};
-
-export default plugin;
+  runtime: {
+    specifier: "./runtime-api.js",
+    exportName: "setLineRuntime",
+  },
+  registerFull(api) {
+    api.registerCommand({
+      name: "card",
+      description: "Send a rich card message (LINE).",
+      acceptsArgs: true,
+      requireAuth: false,
+      async handler(ctx) {
+        const command = await loadLineCardCommand(api);
+        return await command.handler(ctx);
+      },
+    });
+  },
+});

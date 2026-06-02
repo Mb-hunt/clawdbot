@@ -1,5 +1,13 @@
-import { type ModelRef, normalizeProviderId } from "../../agents/model-selection.js";
-import type { MoltbotConfig } from "../../config/config.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
+import {
+  findNormalizedProviderValue,
+  type ModelRef,
+  normalizeProviderId,
+} from "../../agents/model-selection.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 
 export type ModelPickerCatalogEntry = {
   provider: string;
@@ -12,13 +20,14 @@ export type ModelPickerItem = ModelRef;
 const MODEL_PICK_PROVIDER_PREFERENCE = [
   "anthropic",
   "openai",
-  "openai-codex",
+  "openai",
   "minimax",
   "synthetic",
   "google",
   "zai",
   "openrouter",
   "opencode",
+  "opencode-go",
   "github-copilot",
   "groq",
   "cerebras",
@@ -34,9 +43,15 @@ const PROVIDER_RANK = new Map<string, number>(
 function compareProvidersForPicker(a: string, b: string): number {
   const pa = PROVIDER_RANK.get(a);
   const pb = PROVIDER_RANK.get(b);
-  if (pa !== undefined && pb !== undefined) return pa - pb;
-  if (pa !== undefined) return -1;
-  if (pb !== undefined) return 1;
+  if (pa !== undefined && pb !== undefined) {
+    return pa - pb;
+  }
+  if (pa !== undefined) {
+    return -1;
+  }
+  if (pb !== undefined) {
+    return 1;
+  }
   return a.localeCompare(b);
 }
 
@@ -46,11 +61,15 @@ export function buildModelPickerItems(catalog: ModelPickerCatalogEntry[]): Model
 
   for (const entry of catalog) {
     const provider = normalizeProviderId(entry.provider);
-    const model = entry.id?.trim();
-    if (!provider || !model) continue;
+    const model = normalizeOptionalString(entry.id);
+    if (!provider || !model) {
+      continue;
+    }
 
     const key = `${provider}/${model}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
 
     out.push({ model, provider });
@@ -59,8 +78,12 @@ export function buildModelPickerItems(catalog: ModelPickerCatalogEntry[]): Model
   // Sort by provider preference first, then by model name
   out.sort((a, b) => {
     const providerOrder = compareProvidersForPicker(a.provider, b.provider);
-    if (providerOrder !== 0) return providerOrder;
-    return a.model.toLowerCase().localeCompare(b.model.toLowerCase());
+    if (providerOrder !== 0) {
+      return providerOrder;
+    }
+    return normalizeLowercaseStringOrEmpty(a.model).localeCompare(
+      normalizeLowercaseStringOrEmpty(b.model),
+    );
   });
 
   return out;
@@ -68,16 +91,16 @@ export function buildModelPickerItems(catalog: ModelPickerCatalogEntry[]): Model
 
 export function resolveProviderEndpointLabel(
   provider: string,
-  cfg: MoltbotConfig,
+  cfg: OpenClawConfig,
 ): { endpoint?: string; api?: string } {
   const normalized = normalizeProviderId(provider);
   const providers = (cfg.models?.providers ?? {}) as Record<
     string,
     { baseUrl?: string; api?: string } | undefined
   >;
-  const entry = providers[normalized];
-  const endpoint = entry?.baseUrl?.trim();
-  const api = entry?.api?.trim();
+  const entry = findNormalizedProviderValue(providers, normalized);
+  const endpoint = normalizeOptionalString(entry?.baseUrl);
+  const api = normalizeOptionalString(entry?.api);
   return {
     endpoint: endpoint || undefined,
     api: api || undefined,

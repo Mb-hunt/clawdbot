@@ -1,7 +1,7 @@
 import type { MatrixRoomConfig } from "../../types.js";
-import { buildChannelKeyCandidates, resolveChannelEntryMatch } from "clawdbot/plugin-sdk";
+import { buildChannelKeyCandidates, resolveChannelEntryMatch } from "./runtime-api.js";
 
-export type MatrixRoomConfigResolved = {
+type MatrixRoomConfigResolved = {
   allowed: boolean;
   allowlistConfigured: boolean;
   config?: MatrixRoomConfig;
@@ -9,11 +9,15 @@ export type MatrixRoomConfigResolved = {
   matchSource?: "direct" | "wildcard";
 };
 
+function readLegacyRoomAllowAlias(room: MatrixRoomConfig | undefined): boolean | undefined {
+  const rawRoom = room as Record<string, unknown> | undefined;
+  return typeof rawRoom?.allow === "boolean" ? rawRoom.allow : undefined;
+}
+
 export function resolveMatrixRoomConfig(params: {
   rooms?: Record<string, MatrixRoomConfig>;
   roomId: string;
   aliases: string[];
-  name?: string | null;
 }): MatrixRoomConfigResolved {
   const rooms = params.rooms ?? {};
   const keys = Object.keys(rooms);
@@ -22,15 +26,20 @@ export function resolveMatrixRoomConfig(params: {
     params.roomId,
     `room:${params.roomId}`,
     ...params.aliases,
-    params.name ?? "",
   );
-  const { entry: matched, key: matchedKey, wildcardEntry, wildcardKey } = resolveChannelEntryMatch({
+  const {
+    entry: matched,
+    key: matchedKey,
+    wildcardEntry,
+    wildcardKey,
+  } = resolveChannelEntryMatch({
     entries: rooms,
     keys: candidates,
     wildcardKey: "*",
   });
   const resolved = matched ?? wildcardEntry;
-  const allowed = resolved ? resolved.enabled !== false && resolved.allow !== false : false;
+  const legacyAllow = readLegacyRoomAllowAlias(resolved);
+  const allowed = resolved ? resolved.enabled !== false && legacyAllow !== false : false;
   const matchKey = matchedKey ?? wildcardKey;
   const matchSource = matched ? "direct" : wildcardEntry ? "wildcard" : undefined;
   return {

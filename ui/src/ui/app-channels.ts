@@ -1,55 +1,82 @@
+import { resolveControlUiAuthHeader } from "./control-ui-auth.ts";
 import {
   loadChannels,
   logoutWhatsApp,
   startWhatsAppLogin,
   waitWhatsAppLogin,
-} from "./controllers/channels";
-import { loadConfig, saveConfig } from "./controllers/config";
-import type { MoltbotApp } from "./app";
-import type { NostrProfile } from "./types";
-import { createNostrProfileFormState } from "./views/channels.nostr-profile-form";
+  type ChannelsState,
+} from "./controllers/channels.ts";
+import { loadConfig, saveConfig, type ConfigState } from "./controllers/config.ts";
+import type { NostrProfile } from "./types.ts";
+import { createNostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 
-export async function handleWhatsAppStart(host: MoltbotApp, force: boolean) {
-  await startWhatsAppLogin(host, force);
-  await loadChannels(host, true);
+type NostrProfileFormState = ReturnType<typeof createNostrProfileFormState> | null;
+
+type ChannelsActionHost = ChannelsState &
+  ConfigState & {
+    hello?: { auth?: { deviceToken?: string | null } | null } | null;
+    password?: string;
+    settings: { token?: string };
+    nostrProfileFormState: NostrProfileFormState;
+    nostrProfileAccountId: string | null;
+  };
+
+export async function handleWhatsAppStart(host: ChannelsActionHost, force: boolean) {
+  await startWhatsAppLogin(host as ChannelsState, force);
+  await loadChannels(host as ChannelsState, true);
 }
 
-export async function handleWhatsAppWait(host: MoltbotApp) {
-  await waitWhatsAppLogin(host);
-  await loadChannels(host, true);
+export async function handleWhatsAppWait(host: ChannelsActionHost) {
+  await waitWhatsAppLogin(host as ChannelsState);
+  await loadChannels(host as ChannelsState, true);
 }
 
-export async function handleWhatsAppLogout(host: MoltbotApp) {
-  await logoutWhatsApp(host);
-  await loadChannels(host, true);
+export async function handleWhatsAppLogout(host: ChannelsActionHost) {
+  await logoutWhatsApp(host as ChannelsState);
+  await loadChannels(host as ChannelsState, true);
 }
 
-export async function handleChannelConfigSave(host: MoltbotApp) {
-  await saveConfig(host);
-  await loadConfig(host);
-  await loadChannels(host, true);
+export async function handleChannelConfigSave(host: ChannelsActionHost) {
+  const saved = await saveConfig(host as ConfigState);
+  const saveError = host.lastError;
+  if (!saved) {
+    await loadConfig(host as ConfigState);
+    if (saveError && !host.lastError) {
+      host.lastError = saveError;
+    }
+    return;
+  }
+  await loadChannels(host as ChannelsState, true);
 }
 
-export async function handleChannelConfigReload(host: MoltbotApp) {
-  await loadConfig(host);
-  await loadChannels(host, true);
+export async function handleChannelConfigReload(host: ChannelsActionHost) {
+  await loadConfig(host as ConfigState, { discardPendingChanges: true });
+  await loadChannels(host as ChannelsState, true);
 }
 
 function parseValidationErrors(details: unknown): Record<string, string> {
-  if (!Array.isArray(details)) return {};
+  if (!Array.isArray(details)) {
+    return {};
+  }
   const errors: Record<string, string> = {};
   for (const entry of details) {
-    if (typeof entry !== "string") continue;
+    if (typeof entry !== "string") {
+      continue;
+    }
     const [rawField, ...rest] = entry.split(":");
-    if (!rawField || rest.length === 0) continue;
+    if (!rawField || rest.length === 0) {
+      continue;
+    }
     const field = rawField.trim();
     const message = rest.join(":").trim();
-    if (field && message) errors[field] = message;
+    if (field && message) {
+      errors[field] = message;
+    }
   }
   return errors;
 }
 
-function resolveNostrAccountId(host: MoltbotApp): string {
+function resolveNostrAccountId(host: ChannelsActionHost): string {
   const accounts = host.channelsSnapshot?.channelAccounts?.nostr ?? [];
   return accounts[0]?.accountId ?? host.nostrProfileAccountId ?? "default";
 }
@@ -58,8 +85,13 @@ function buildNostrProfileUrl(accountId: string, suffix = ""): string {
   return `/api/channels/nostr/${encodeURIComponent(accountId)}/profile${suffix}`;
 }
 
+function buildGatewayHttpHeaders(host: ChannelsActionHost): Record<string, string> {
+  const authorization = resolveControlUiAuthHeader(host);
+  return authorization ? { Authorization: authorization } : {};
+}
+
 export function handleNostrProfileEdit(
-  host: MoltbotApp,
+  host: ChannelsActionHost,
   accountId: string,
   profile: NostrProfile | null,
 ) {
@@ -67,18 +99,20 @@ export function handleNostrProfileEdit(
   host.nostrProfileFormState = createNostrProfileFormState(profile ?? undefined);
 }
 
-export function handleNostrProfileCancel(host: MoltbotApp) {
+export function handleNostrProfileCancel(host: ChannelsActionHost) {
   host.nostrProfileFormState = null;
   host.nostrProfileAccountId = null;
 }
 
 export function handleNostrProfileFieldChange(
-  host: MoltbotApp,
+  host: ChannelsActionHost,
   field: keyof NostrProfile,
   value: string,
 ) {
   const state = host.nostrProfileFormState;
-  if (!state) return;
+  if (!state) {
+    return;
+  }
   host.nostrProfileFormState = {
     ...state,
     values: {
@@ -92,18 +126,22 @@ export function handleNostrProfileFieldChange(
   };
 }
 
-export function handleNostrProfileToggleAdvanced(host: MoltbotApp) {
+export function handleNostrProfileToggleAdvanced(host: ChannelsActionHost) {
   const state = host.nostrProfileFormState;
-  if (!state) return;
+  if (!state) {
+    return;
+  }
   host.nostrProfileFormState = {
     ...state,
     showAdvanced: !state.showAdvanced,
   };
 }
 
-export async function handleNostrProfileSave(host: MoltbotApp) {
+export async function handleNostrProfileSave(host: ChannelsActionHost) {
   const state = host.nostrProfileFormState;
-  if (!state || state.saving) return;
+  if (!state || state.saving) {
+    return;
+  }
   const accountId = resolveNostrAccountId(host);
 
   host.nostrProfileFormState = {
@@ -119,12 +157,16 @@ export async function handleNostrProfileSave(host: MoltbotApp) {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        ...buildGatewayHttpHeaders(host),
       },
       body: JSON.stringify(state.values),
     });
-    const data = (await response.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; details?: unknown; persisted?: boolean }
-      | null;
+    const data = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+      details?: unknown;
+      persisted?: boolean;
+    } | null;
 
     if (!response.ok || data?.ok === false || !data) {
       const errorMessage = data?.error ?? `Profile update failed (${response.status})`;
@@ -156,7 +198,7 @@ export async function handleNostrProfileSave(host: MoltbotApp) {
       fieldErrors: {},
       original: { ...state.values },
     };
-    await loadChannels(host, true);
+    await loadChannels(host as ChannelsState, true);
   } catch (err) {
     host.nostrProfileFormState = {
       ...state,
@@ -167,9 +209,11 @@ export async function handleNostrProfileSave(host: MoltbotApp) {
   }
 }
 
-export async function handleNostrProfileImport(host: MoltbotApp) {
+export async function handleNostrProfileImport(host: ChannelsActionHost) {
   const state = host.nostrProfileFormState;
-  if (!state || state.importing) return;
+  if (!state || state.importing) {
+    return;
+  }
   const accountId = resolveNostrAccountId(host);
 
   host.nostrProfileFormState = {
@@ -184,12 +228,17 @@ export async function handleNostrProfileImport(host: MoltbotApp) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...buildGatewayHttpHeaders(host),
       },
       body: JSON.stringify({ autoMerge: true }),
     });
-    const data = (await response.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; imported?: NostrProfile; merged?: NostrProfile; saved?: boolean }
-      | null;
+    const data = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+      imported?: NostrProfile;
+      merged?: NostrProfile;
+      saved?: boolean;
+    } | null;
 
     if (!response.ok || data?.ok === false || !data) {
       const errorMessage = data?.error ?? `Profile import failed (${response.status})`;

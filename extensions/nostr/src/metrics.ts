@@ -7,7 +7,7 @@
 // Metric Types
 // ============================================================================
 
-export type EventMetricName =
+type EventMetricName =
   | "event.received"
   | "event.processed"
   | "event.duplicate"
@@ -22,7 +22,7 @@ export type EventMetricName =
   | "event.rejected.decrypt_failed"
   | "event.rejected.self_message";
 
-export type RelayMetricName =
+type RelayMetricName =
   | "relay.connect"
   | "relay.disconnect"
   | "relay.reconnect"
@@ -37,13 +37,11 @@ export type RelayMetricName =
   | "relay.circuit_breaker.close"
   | "relay.circuit_breaker.half_open";
 
-export type RateLimitMetricName = "rate_limit.per_sender" | "rate_limit.global";
+type RateLimitMetricName = "rate_limit.per_sender" | "rate_limit.global";
 
-export type DecryptMetricName = "decrypt.success" | "decrypt.failure";
+type DecryptMetricName = "decrypt.success" | "decrypt.failure";
 
-export type MemoryMetricName =
-  | "memory.seen_tracker_size"
-  | "memory.rate_limiter_entries";
+type MemoryMetricName = "memory.seen_tracker_size" | "memory.rate_limiter_entries";
 
 export type MetricName =
   | EventMetricName
@@ -51,6 +49,24 @@ export type MetricName =
   | RateLimitMetricName
   | DecryptMetricName
   | MemoryMetricName;
+
+type RelayMetrics = {
+  connects: number;
+  disconnects: number;
+  reconnects: number;
+  errors: number;
+  messagesReceived: {
+    event: number;
+    eose: number;
+    closed: number;
+    notice: number;
+    ok: number;
+    auth: number;
+  };
+  circuitBreakerState: "closed" | "open" | "half_open";
+  circuitBreakerOpens: number;
+  circuitBreakerCloses: number;
+};
 
 // ============================================================================
 // Metric Event
@@ -67,7 +83,7 @@ export interface MetricEvent {
   labels?: Record<string, string | number>;
 }
 
-export type OnMetricCallback = (event: MetricEvent) => void;
+type OnMetricCallback = (event: MetricEvent) => void;
 
 // ============================================================================
 // Metrics Snapshot (for getMetrics())
@@ -95,26 +111,7 @@ export interface MetricsSnapshot {
   };
 
   /** Relay stats by URL */
-  relays: Record<
-    string,
-    {
-      connects: number;
-      disconnects: number;
-      reconnects: number;
-      errors: number;
-      messagesReceived: {
-        event: number;
-        eose: number;
-        closed: number;
-        notice: number;
-        ok: number;
-        auth: number;
-      };
-      circuitBreakerState: "closed" | "open" | "half_open";
-      circuitBreakerOpens: number;
-      circuitBreakerCloses: number;
-    }
-  >;
+  relays: Record<string, RelayMetrics>;
 
   /** Rate limiting stats */
   rateLimiting: {
@@ -144,11 +141,7 @@ export interface MetricsSnapshot {
 
 export interface NostrMetrics {
   /** Emit a metric event */
-  emit: (
-    name: MetricName,
-    value?: number,
-    labels?: Record<string, string | number>
-  ) => void;
+  emit: (name: MetricName, value?: number, labels?: Record<string, string | number>) => void;
 
   /** Get current metrics snapshot */
   getSnapshot: () => MetricsSnapshot;
@@ -180,26 +173,7 @@ export function createMetrics(onMetric?: OnMetricCallback): NostrMetrics {
   };
 
   // Per-relay stats
-  const relays = new Map<
-    string,
-    {
-      connects: number;
-      disconnects: number;
-      reconnects: number;
-      errors: number;
-      messagesReceived: {
-        event: number;
-        eose: number;
-        closed: number;
-        notice: number;
-        ok: number;
-        auth: number;
-      };
-      circuitBreakerState: "closed" | "open" | "half_open";
-      circuitBreakerOpens: number;
-      circuitBreakerCloses: number;
-    }
-  >();
+  const relays = new Map<string, RelayMetrics>();
 
   // Rate limiting stats
   const rateLimiting = {
@@ -244,11 +218,7 @@ export function createMetrics(onMetric?: OnMetricCallback): NostrMetrics {
     return relay;
   }
 
-  function emit(
-    name: MetricName,
-    value: number = 1,
-    labels?: Record<string, string | number>
-  ): void {
+  function emit(name: MetricName, value = 1, labels?: Record<string, string | number>): void {
     // Fire callback if provided
     if (onMetric) {
       onMetric({
@@ -306,34 +276,54 @@ export function createMetrics(onMetric?: OnMetricCallback): NostrMetrics {
 
       // Relay metrics
       case "relay.connect":
-        if (relayUrl) getOrCreateRelay(relayUrl).connects += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).connects += value;
+        }
         break;
       case "relay.disconnect":
-        if (relayUrl) getOrCreateRelay(relayUrl).disconnects += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).disconnects += value;
+        }
         break;
       case "relay.reconnect":
-        if (relayUrl) getOrCreateRelay(relayUrl).reconnects += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).reconnects += value;
+        }
         break;
       case "relay.error":
-        if (relayUrl) getOrCreateRelay(relayUrl).errors += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).errors += value;
+        }
         break;
       case "relay.message.event":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.event += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.event += value;
+        }
         break;
       case "relay.message.eose":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.eose += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.eose += value;
+        }
         break;
       case "relay.message.closed":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.closed += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.closed += value;
+        }
         break;
       case "relay.message.notice":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.notice += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.notice += value;
+        }
         break;
       case "relay.message.ok":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.ok += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.ok += value;
+        }
         break;
       case "relay.message.auth":
-        if (relayUrl) getOrCreateRelay(relayUrl).messagesReceived.auth += value;
+        if (relayUrl) {
+          getOrCreateRelay(relayUrl).messagesReceived.auth += value;
+        }
         break;
       case "relay.circuit_breaker.open":
         if (relayUrl) {

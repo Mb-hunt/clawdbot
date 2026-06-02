@@ -2,6 +2,7 @@ import type { ReplyPayload } from "../../auto-reply/types.js";
 import type { OutboundDeliveryJson } from "./format.js";
 import { normalizeOutboundPayloadsForJson, type OutboundPayloadJson } from "./payloads.js";
 
+/** Structured result returned by outbound helpers when payloads/meta wrap delivery data. */
 export type OutboundResultEnvelope = {
   payloads?: OutboundPayloadJson[];
   meta?: unknown;
@@ -9,7 +10,7 @@ export type OutboundResultEnvelope = {
 };
 
 type BuildEnvelopeParams = {
-  payloads?: ReplyPayload[] | OutboundPayloadJson[];
+  payloads?: readonly ReplyPayload[] | readonly OutboundPayloadJson[];
   meta?: unknown;
   delivery?: OutboundDeliveryJson;
   flattenDelivery?: boolean;
@@ -19,6 +20,7 @@ const isOutboundPayloadJson = (
   payload: ReplyPayload | OutboundPayloadJson,
 ): payload is OutboundPayloadJson => "mediaUrl" in payload;
 
+/** Builds the outbound result envelope, flattening plain delivery-only results by default. */
 export function buildOutboundResultEnvelope(
   params: BuildEnvelopeParams,
 ): OutboundResultEnvelope | OutboundDeliveryJson {
@@ -29,8 +31,8 @@ export function buildOutboundResultEnvelope(
       : params.payloads.length === 0
         ? []
         : isOutboundPayloadJson(params.payloads[0])
-          ? (params.payloads as OutboundPayloadJson[])
-          : normalizeOutboundPayloadsForJson(params.payloads as ReplyPayload[]);
+          ? [...(params.payloads as readonly OutboundPayloadJson[])]
+          : normalizeOutboundPayloadsForJson(params.payloads as readonly ReplyPayload[]);
 
   if (params.flattenDelivery !== false && params.delivery && !params.meta && !hasPayloads) {
     return params.delivery;

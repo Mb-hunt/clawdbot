@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
+import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import { resolveWorkspaceTemplateSearchDirs } from "../../agents/workspace-templates.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import { handleReset } from "../../commands/onboard-helpers.js";
-import { createConfigIO, writeConfigFile } from "../../config/config.js";
+import { createConfigIO, replaceConfigFile } from "../../config/config.js";
 import { defaultRuntime } from "../../runtime.js";
 import { resolveUserPath, shortenHomePath } from "../../utils.js";
 
@@ -13,27 +14,40 @@ const DEV_IDENTITY_THEME = "protocol droid";
 const DEV_IDENTITY_EMOJI = "🤖";
 const DEV_AGENT_WORKSPACE_SUFFIX = "dev";
 
-const DEV_TEMPLATE_DIR = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../../../docs/reference/templates",
-);
-
 async function loadDevTemplate(name: string, fallback: string): Promise<string> {
   try {
-    const raw = await fs.promises.readFile(path.join(DEV_TEMPLATE_DIR, name), "utf-8");
-    if (!raw.startsWith("---")) return raw;
-    const endIndex = raw.indexOf("\n---", 3);
-    if (endIndex === -1) return raw;
-    return raw.slice(endIndex + "\n---".length).replace(/^\s+/, "");
+    const templateDirs = await resolveWorkspaceTemplateSearchDirs();
+    for (const templateDir of templateDirs) {
+      let raw: string;
+      try {
+        raw = await fs.promises.readFile(path.join(templateDir, name), "utf-8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+      if (!raw.startsWith("---")) {
+        return raw;
+      }
+      const endIndex = raw.indexOf("\n---", 3);
+      if (endIndex === -1) {
+        return raw;
+      }
+      return raw.slice(endIndex + "\n---".length).replace(/^\s+/, "");
+    }
   } catch {
     return fallback;
   }
+  return fallback;
 }
 
 const resolveDevWorkspaceDir = (env: NodeJS.ProcessEnv = process.env): string => {
   const baseDir = resolveDefaultAgentWorkspaceDir(env, os.homedir);
-  const profile = env.CLAWDBOT_PROFILE?.trim().toLowerCase();
-  if (profile === "dev") return baseDir;
+  const profile = normalizeOptionalLowercaseString(env.OPENCLAW_PROFILE);
+  if (profile === "dev") {
+    return baseDir;
+  }
   return `${baseDir}-${DEV_AGENT_WORKSPACE_SUFFIX}`;
 };
 
@@ -45,7 +59,9 @@ async function writeFileIfMissing(filePath: string, content: string) {
     });
   } catch (err) {
     const anyErr = err as { code?: string };
-    if (anyErr.code !== "EEXIST") throw err;
+    if (anyErr.code !== "EEXIST") {
+      throw err;
+    }
   }
 }
 
@@ -56,7 +72,7 @@ async function ensureDevWorkspace(dir: string) {
   const [agents, soul, tools, identity, user] = await Promise.all([
     loadDevTemplate(
       "AGENTS.dev.md",
-      `# AGENTS.md - Moltbot Dev Workspace\n\nDefault dev workspace for moltbot gateway --dev.\n`,
+      `# AGENTS.md - OpenClaw Dev Workspace\n\nDefault dev workspace for openclaw gateway --dev.\n`,
     ),
     loadDevTemplate(
       "SOUL.dev.md",
@@ -92,31 +108,36 @@ export async function ensureDevGatewayConfig(opts: { reset?: boolean }) {
   const io = createConfigIO();
   const configPath = io.configPath;
   const configExists = fs.existsSync(configPath);
-  if (!opts.reset && configExists) return;
+  if (!opts.reset && configExists) {
+    return;
+  }
 
-  await writeConfigFile({
-    gateway: {
-      mode: "local",
-      bind: "loopback",
-    },
-    agents: {
-      defaults: {
-        workspace,
-        skipBootstrap: true,
+  await replaceConfigFile({
+    nextConfig: {
+      gateway: {
+        mode: "local",
+        bind: "loopback",
       },
-      list: [
-        {
-          id: "dev",
-          default: true,
+      agents: {
+        defaults: {
           workspace,
-          identity: {
-            name: DEV_IDENTITY_NAME,
-            theme: DEV_IDENTITY_THEME,
-            emoji: DEV_IDENTITY_EMOJI,
-          },
+          skipBootstrap: true,
         },
-      ],
+        list: [
+          {
+            id: "dev",
+            default: true,
+            workspace,
+            identity: {
+              name: DEV_IDENTITY_NAME,
+              theme: DEV_IDENTITY_THEME,
+              emoji: DEV_IDENTITY_EMOJI,
+            },
+          },
+        ],
+      },
     },
+    afterWrite: { mode: "auto" },
   });
   await ensureDevWorkspace(workspace);
   defaultRuntime.log(`Dev config ready: ${shortenHomePath(configPath)}`);

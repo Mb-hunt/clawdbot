@@ -1,18 +1,55 @@
-import type { MoltbotPluginApi } from "clawdbot/plugin-sdk";
-import { emptyPluginConfigSchema } from "clawdbot/plugin-sdk";
+import {
+  defineBundledChannelEntry,
+  type OpenClawPluginApi,
+} from "openclaw/plugin-sdk/channel-entry-contract";
+import { registerMatrixCliMetadata } from "./cli-metadata.js";
+import { registerMatrixSubagentHooks } from "./subagent-hooks-api.js";
 
-import { matrixPlugin } from "./src/channel.js";
-import { setMatrixRuntime } from "./src/runtime.js";
+type MatrixHandlersRuntimeModule = typeof import("./plugin-entry.handlers.runtime.js");
 
-const plugin = {
+let matrixHandlersRuntimePromise: Promise<MatrixHandlersRuntimeModule> | null = null;
+
+function loadMatrixHandlersRuntimeModule() {
+  matrixHandlersRuntimePromise ??= import("./plugin-entry.handlers.runtime.js");
+  return matrixHandlersRuntimePromise;
+}
+
+export function registerMatrixFullRuntime(api: OpenClawPluginApi): void {
+  api.registerGatewayMethod("matrix.verify.recoveryKey", async (ctx) => {
+    const { handleVerifyRecoveryKey } = await loadMatrixHandlersRuntimeModule();
+    await handleVerifyRecoveryKey(ctx);
+  });
+
+  api.registerGatewayMethod("matrix.verify.bootstrap", async (ctx) => {
+    const { handleVerificationBootstrap } = await loadMatrixHandlersRuntimeModule();
+    await handleVerificationBootstrap(ctx);
+  });
+
+  api.registerGatewayMethod("matrix.verify.status", async (ctx) => {
+    const { handleVerificationStatus } = await loadMatrixHandlersRuntimeModule();
+    await handleVerificationStatus(ctx);
+  });
+
+  registerMatrixSubagentHooks(api);
+}
+
+export default defineBundledChannelEntry({
   id: "matrix",
   name: "Matrix",
   description: "Matrix channel plugin (matrix-js-sdk)",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: MoltbotPluginApi) {
-    setMatrixRuntime(api.runtime);
-    api.registerChannel({ plugin: matrixPlugin });
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./channel-plugin-api.js",
+    exportName: "matrixPlugin",
   },
-};
-
-export default plugin;
+  secrets: {
+    specifier: "./secret-contract-api.js",
+    exportName: "channelSecrets",
+  },
+  runtime: {
+    specifier: "./runtime-setter-api.js",
+    exportName: "setMatrixRuntime",
+  },
+  registerCliMetadata: registerMatrixCliMetadata,
+  registerFull: registerMatrixFullRuntime,
+});

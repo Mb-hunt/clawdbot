@@ -1,4 +1,6 @@
-export type ParsedLogLine = {
+import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+
+type ParsedLogLine = {
   time?: string;
   level?: string;
   subsystem?: string;
@@ -10,7 +12,9 @@ export type ParsedLogLine = {
 function extractMessage(value: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const key of Object.keys(value)) {
-    if (!/^\d+$/.test(key)) continue;
+    if (!/^\d+$/.test(key)) {
+      continue;
+    }
     const item = value[key];
     if (typeof item === "string") {
       parts.push(item);
@@ -22,7 +26,9 @@ function extractMessage(value: Record<string, unknown>): string {
 }
 
 function parseMetaName(raw?: unknown): { subsystem?: string; module?: string } {
-  if (typeof raw !== "string") return {};
+  if (typeof raw !== "string") {
+    return {};
+  }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
@@ -37,7 +43,7 @@ function parseMetaName(raw?: unknown): { subsystem?: string; module?: string } {
 export function parseLogLine(raw: string): ParsedLogLine | null {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const meta = parsed._meta as Record<string, unknown> | undefined;
+    const meta = parsed["_meta"] as Record<string, unknown> | undefined;
     const nameMeta = parseMetaName(meta?.name);
     const levelRaw = typeof meta?.logLevelName === "string" ? meta.logLevelName : undefined;
     return {
@@ -47,7 +53,7 @@ export function parseLogLine(raw: string): ParsedLogLine | null {
           : typeof meta?.date === "string"
             ? meta.date
             : undefined,
-      level: levelRaw ? levelRaw.toLowerCase() : undefined,
+      level: normalizeOptionalLowercaseString(levelRaw),
       subsystem: nameMeta.subsystem,
       module: nameMeta.module,
       message: extractMessage(parsed),

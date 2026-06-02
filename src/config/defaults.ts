@@ -1,28 +1,48 @@
+import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import {
+  collectManifestModelIdNormalizationPolicies,
+  normalizeConfiguredProviderCatalogModelId,
+} from "@openclaw/model-catalog-core/provider-model-id-normalization";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
-import { parseModelRef } from "../agents/model-selection.js";
-import { resolveTalkApiKey } from "./talk.js";
-import type { MoltbotConfig } from "./types.js";
-import { DEFAULT_AGENT_MAX_CONCURRENT, DEFAULT_SUBAGENT_MAX_CONCURRENT } from "./agent-limits.js";
+import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
+import {
+  DEFAULT_AGENT_MAX_CONCURRENT,
+  DEFAULT_SUBAGENT_ARCHIVE_AFTER_MINUTES,
+  DEFAULT_SUBAGENT_MAX_CONCURRENT,
+} from "./agent-limits.js";
+import { DEFAULT_CRON_MAX_CONCURRENT_RUNS } from "./cron-limits.js";
+import { normalizeAgentModelMapForConfig, normalizeAgentModelRefForConfig } from "./model-input.js";
+import {
+  applyProviderConfigDefaultsForConfig,
+  normalizeProviderConfigForConfigDefaults,
+} from "./provider-policy.js";
+import { normalizeTalkConfig } from "./talk.js";
 import type { ModelDefinitionConfig } from "./types.models.js";
+import type { OpenClawConfig } from "./types.openclaw.js";
 
 type WarnState = { warned: boolean };
+type ProviderPolicyDefaultsOptions = {
+  manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
+  loadManifestRegistry?: () => Pick<PluginManifestRegistry, "plugins"> | undefined;
+};
 
-let defaultWarnState: WarnState = { warned: false };
-
-type AnthropicAuthDefaultsMode = "api_key" | "oauth";
+const defaultWarnState: WarnState = { warned: false };
 
 const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
-  // Anthropic (pi-ai catalog uses "latest" ids without date suffix)
-  opus: "anthropic/claude-opus-4-5",
-  sonnet: "anthropic/claude-sonnet-4-5",
+  // Anthropic (shared model runtime catalog uses "latest" ids without date suffix)
+  opus: "anthropic/claude-opus-4-8",
+  sonnet: "anthropic/claude-sonnet-4-6",
 
   // OpenAI
-  gpt: "openai/gpt-5.2",
-  "gpt-mini": "openai/gpt-5-mini",
+  gpt: "openai/gpt-5.4",
+  "gpt-mini": "openai/gpt-5.4-mini",
+  "gpt-nano": "openai/gpt-5.4-nano",
 
-  // Google Gemini (3.x are preview ids in the catalog)
-  gemini: "google/gemini-3-pro-preview",
+  // Google Gemini (3.x — flash-lite is GA; pro and flash are still preview)
+  gemini: "google/gemini-3.1-pro-preview",
   "gemini-flash": "google/gemini-3-flash-preview",
+  "gemini-flash-lite": "google/gemini-3.1-flash-lite",
 };
 
 const DEFAULT_MODEL_COST: ModelDefinitionConfig["cost"] = {
@@ -33,6 +53,14 @@ const DEFAULT_MODEL_COST: ModelDefinitionConfig["cost"] = {
 };
 const DEFAULT_MODEL_INPUT: ModelDefinitionConfig["input"] = ["text"];
 const DEFAULT_MODEL_MAX_TOKENS = 8192;
+const MISTRAL_SAFE_MAX_TOKENS_BY_MODEL = {
+  "devstral-medium-latest": 32_768,
+  "magistral-small": 40_000,
+  "mistral-large-latest": 16_384,
+  "mistral-medium-2508": 8_192,
+  "mistral-small-latest": 16_384,
+  "pixtral-large-latest": 32_768,
+} as const;
 
 type ModelDefinitionLike = Partial<ModelDefinitionConfig> &
   Pick<ModelDefinitionConfig, "id" | "name">;
@@ -50,52 +78,39 @@ function resolveModelCost(
     cacheRead: typeof raw?.cacheRead === "number" ? raw.cacheRead : DEFAULT_MODEL_COST.cacheRead,
     cacheWrite:
       typeof raw?.cacheWrite === "number" ? raw.cacheWrite : DEFAULT_MODEL_COST.cacheWrite,
+    ...(raw?.tieredPricing ? { tieredPricing: raw.tieredPricing } : {}),
   };
 }
 
-function resolveAnthropicDefaultAuthMode(cfg: MoltbotConfig): AnthropicAuthDefaultsMode | null {
-  const profiles = cfg.auth?.profiles ?? {};
-  const anthropicProfiles = Object.entries(profiles).filter(
-    ([, profile]) => profile?.provider === "anthropic",
-  );
-
-  const order = cfg.auth?.order?.anthropic ?? [];
-  for (const profileId of order) {
-    const entry = profiles[profileId];
-    if (!entry || entry.provider !== "anthropic") continue;
-    if (entry.mode === "api_key") return "api_key";
-    if (entry.mode === "oauth" || entry.mode === "token") return "oauth";
+export function resolveNormalizedProviderModelMaxTokens(params: {
+  providerId: string;
+  modelId: string;
+  contextWindow: number;
+  rawMaxTokens: number;
+}): number {
+  const clamped = Math.min(params.rawMaxTokens, params.contextWindow);
+  if (normalizeProviderId(params.providerId) !== "mistral" || clamped < params.contextWindow) {
+    return clamped;
   }
 
-  const hasApiKey = anthropicProfiles.some(([, profile]) => profile?.mode === "api_key");
-  const hasOauth = anthropicProfiles.some(
-    ([, profile]) => profile?.mode === "oauth" || profile?.mode === "token",
-  );
-  if (hasApiKey && !hasOauth) return "api_key";
-  if (hasOauth && !hasApiKey) return "oauth";
-
-  if (process.env.ANTHROPIC_OAUTH_TOKEN?.trim()) return "oauth";
-  if (process.env.ANTHROPIC_API_KEY?.trim()) return "api_key";
-  return null;
+  const safeMaxTokens =
+    MISTRAL_SAFE_MAX_TOKENS_BY_MODEL[
+      params.modelId as keyof typeof MISTRAL_SAFE_MAX_TOKENS_BY_MODEL
+    ] ?? DEFAULT_MODEL_MAX_TOKENS;
+  return Math.min(safeMaxTokens, params.contextWindow);
 }
 
-function resolvePrimaryModelRef(raw?: string): string | null {
-  if (!raw || typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const aliasKey = trimmed.toLowerCase();
-  return DEFAULT_MODEL_ALIASES[aliasKey] ?? trimmed;
-}
-
-export type SessionDefaultsOptions = {
+type SessionDefaultsOptions = {
   warn?: (message: string) => void;
   warnState?: WarnState;
 };
 
-export function applyMessageDefaults(cfg: MoltbotConfig): MoltbotConfig {
+export function applyMessageDefaults(cfg: OpenClawConfig): OpenClawConfig {
   const messages = cfg.messages;
   const hasAckScope = messages?.ackReactionScope !== undefined;
-  if (hasAckScope) return cfg;
+  if (hasAckScope) {
+    return cfg;
+  }
 
   const nextMessages = messages ? { ...messages } : {};
   nextMessages.ackReactionScope = "group-mentions";
@@ -106,17 +121,19 @@ export function applyMessageDefaults(cfg: MoltbotConfig): MoltbotConfig {
 }
 
 export function applySessionDefaults(
-  cfg: MoltbotConfig,
+  cfg: OpenClawConfig,
   options: SessionDefaultsOptions = {},
-): MoltbotConfig {
+): OpenClawConfig {
   const session = cfg.session;
-  if (!session || session.mainKey === undefined) return cfg;
+  if (!session || session.mainKey === undefined) {
+    return cfg;
+  }
 
   const trimmed = session.mainKey.trim();
   const warn = options.warn ?? console.warn;
   const warnState = options.warnState ?? defaultWarnState;
 
-  const next: MoltbotConfig = {
+  const next: OpenClawConfig = {
     ...cfg,
     session: { ...session, mainKey: "main" },
   };
@@ -129,40 +146,65 @@ export function applySessionDefaults(
   return next;
 }
 
-export function applyTalkApiKey(config: MoltbotConfig): MoltbotConfig {
-  const resolved = resolveTalkApiKey();
-  if (!resolved) return config;
-  const existing = config.talk?.apiKey?.trim();
-  if (existing) return config;
-  return {
-    ...config,
-    talk: {
-      ...config.talk,
-      apiKey: resolved,
-    },
-  };
+export function applyTalkConfigNormalization(config: OpenClawConfig): OpenClawConfig {
+  return normalizeTalkConfig(config);
 }
 
-export function applyModelDefaults(cfg: MoltbotConfig): MoltbotConfig {
+export function applyModelDefaults(
+  cfg: OpenClawConfig,
+  options: ProviderPolicyDefaultsOptions = {},
+): OpenClawConfig {
   let mutated = false;
   let nextCfg = cfg;
 
   const providerConfig = nextCfg.models?.providers;
   if (providerConfig) {
+    const manifestRegistry = options.manifestRegistry ?? options.loadManifestRegistry?.();
+    const modelIdNormalizationPolicies = manifestRegistry
+      ? collectManifestModelIdNormalizationPolicies(manifestRegistry.plugins)
+      : undefined;
     const nextProviders = { ...providerConfig };
     for (const [providerId, provider] of Object.entries(providerConfig)) {
-      const models = provider.models;
-      if (!Array.isArray(models) || models.length === 0) continue;
+      const normalizedProvider = normalizeProviderConfigForConfigDefaults({
+        provider: providerId,
+        providerConfig: provider,
+        manifestRegistry: options.manifestRegistry,
+      });
+      const models = normalizedProvider.models;
+      if (!Array.isArray(models) || models.length === 0) {
+        if (normalizedProvider !== provider) {
+          nextProviders[providerId] = normalizedProvider;
+          mutated = true;
+        }
+        continue;
+      }
+      const providerApi = normalizedProvider.api;
+      const nextProvider = normalizedProvider;
+      if (nextProvider !== provider) {
+        mutated = true;
+      }
       let providerMutated = false;
       const nextModels = models.map((model) => {
         const raw = model as ModelDefinitionLike;
         let modelMutated = false;
+        const id = normalizeConfiguredProviderCatalogModelId(
+          providerId,
+          raw.id,
+          modelIdNormalizationPolicies,
+        );
+        if (id !== raw.id) {
+          modelMutated = true;
+        }
 
         const reasoning = typeof raw.reasoning === "boolean" ? raw.reasoning : false;
-        if (raw.reasoning !== reasoning) modelMutated = true;
+        if (raw.reasoning !== reasoning) {
+          modelMutated = true;
+        }
 
         const input = raw.input ?? [...DEFAULT_MODEL_INPUT];
-        if (raw.input === undefined) modelMutated = true;
+        if (raw.input === undefined) {
+          modelMutated = true;
+        }
 
         const cost = resolveModelCost(raw.cost);
         const costMutated =
@@ -171,31 +213,55 @@ export function applyModelDefaults(cfg: MoltbotConfig): MoltbotConfig {
           raw.cost.output !== cost.output ||
           raw.cost.cacheRead !== cost.cacheRead ||
           raw.cost.cacheWrite !== cost.cacheWrite;
-        if (costMutated) modelMutated = true;
+        if (costMutated) {
+          modelMutated = true;
+        }
 
         const contextWindow = isPositiveNumber(raw.contextWindow)
           ? raw.contextWindow
           : DEFAULT_CONTEXT_TOKENS;
-        if (raw.contextWindow !== contextWindow) modelMutated = true;
+        if (raw.contextWindow !== contextWindow) {
+          modelMutated = true;
+        }
 
         const defaultMaxTokens = Math.min(DEFAULT_MODEL_MAX_TOKENS, contextWindow);
-        const maxTokens = isPositiveNumber(raw.maxTokens) ? raw.maxTokens : defaultMaxTokens;
-        if (raw.maxTokens !== maxTokens) modelMutated = true;
+        const rawMaxTokens = isPositiveNumber(raw.maxTokens) ? raw.maxTokens : defaultMaxTokens;
+        const maxTokens = resolveNormalizedProviderModelMaxTokens({
+          providerId,
+          modelId: id,
+          contextWindow,
+          rawMaxTokens,
+        });
+        if (raw.maxTokens !== maxTokens) {
+          modelMutated = true;
+        }
+        const api = raw.api ?? providerApi;
+        if (raw.api !== api) {
+          modelMutated = true;
+        }
 
-        if (!modelMutated) return model;
+        if (!modelMutated) {
+          return model;
+        }
         providerMutated = true;
-        return {
-          ...raw,
+        return Object.assign({}, raw, {
+          id,
           reasoning,
           input,
           cost,
           contextWindow,
           maxTokens,
-        } as ModelDefinitionConfig;
+          api,
+        }) as ModelDefinitionConfig;
       });
 
-      if (!providerMutated) continue;
-      nextProviders[providerId] = { ...provider, models: nextModels };
+      if (!providerMutated) {
+        if (nextProvider !== provider) {
+          nextProviders[providerId] = nextProvider;
+        }
+        continue;
+      }
+      nextProviders[providerId] = { ...nextProvider, models: nextModels };
       mutated = true;
     }
 
@@ -210,10 +276,68 @@ export function applyModelDefaults(cfg: MoltbotConfig): MoltbotConfig {
     }
   }
 
-  const existingAgent = nextCfg.agents?.defaults;
-  if (!existingAgent) return mutated ? nextCfg : cfg;
-  const existingModels = existingAgent.models ?? {};
-  if (Object.keys(existingModels).length === 0) return mutated ? nextCfg : cfg;
+  let nextAgents = nextCfg.agents;
+  const rawAgentList = nextAgents?.list;
+  if (Array.isArray(rawAgentList)) {
+    let listMutated = false;
+    const agentList = rawAgentList.map((agent) => {
+      if (!isRecord(agent)) {
+        return agent;
+      }
+      let nextAgent = agent;
+      if (Object.hasOwn(agent, "model")) {
+        const normalizedModel = normalizeAgentModelConfigForDefaults(agent.model);
+        if (normalizedModel !== agent.model) {
+          nextAgent = { ...nextAgent, model: normalizedModel as typeof agent.model };
+          listMutated = true;
+        }
+      }
+      if (isRecord(agent.models)) {
+        const normalizedModels = normalizeAgentModelMapForConfig(agent.models);
+        if (normalizedModels !== agent.models) {
+          nextAgent = { ...nextAgent, models: normalizedModels };
+          listMutated = true;
+        }
+      }
+      return nextAgent;
+    });
+    if (listMutated) {
+      nextAgents = { ...nextAgents, list: agentList };
+      mutated = true;
+    }
+  }
+
+  const existingAgent = nextAgents?.defaults;
+  if (!existingAgent) {
+    if (!mutated) {
+      return cfg;
+    }
+    return nextAgents === nextCfg.agents ? nextCfg : { ...nextCfg, agents: nextAgents };
+  }
+
+  let nextAgent = existingAgent;
+  const normalizedModel = normalizeAgentModelConfigForDefaults(existingAgent.model);
+  if (normalizedModel !== existingAgent.model) {
+    nextAgent = { ...nextAgent, model: normalizedModel as typeof existingAgent.model };
+    mutated = true;
+  }
+
+  const rawExistingModels = existingAgent.models ?? {};
+  const existingModels = normalizeAgentModelMapForConfig(rawExistingModels);
+  if (existingModels !== rawExistingModels) {
+    mutated = true;
+  }
+  if (Object.keys(existingModels).length === 0) {
+    return mutated
+      ? {
+          ...nextCfg,
+          agents: {
+            ...nextAgents,
+            defaults: nextAgent,
+          },
+        }
+      : cfg;
+  }
 
   const nextModels: Record<string, { alias?: string }> = {
     ...existingModels,
@@ -221,24 +345,62 @@ export function applyModelDefaults(cfg: MoltbotConfig): MoltbotConfig {
 
   for (const [alias, target] of Object.entries(DEFAULT_MODEL_ALIASES)) {
     const entry = nextModels[target];
-    if (!entry) continue;
-    if (entry.alias !== undefined) continue;
+    if (!entry) {
+      continue;
+    }
+    if (entry.alias !== undefined) {
+      continue;
+    }
     nextModels[target] = { ...entry, alias };
     mutated = true;
   }
 
-  if (!mutated) return cfg;
+  if (!mutated) {
+    return cfg;
+  }
 
   return {
     ...nextCfg,
     agents: {
-      ...nextCfg.agents,
-      defaults: { ...existingAgent, models: nextModels },
+      ...nextAgents,
+      defaults: { ...nextAgent, models: nextModels },
     },
   };
 }
 
-export function applyAgentDefaults(cfg: MoltbotConfig): MoltbotConfig {
+function normalizeAgentModelConfigForDefaults(value: unknown): unknown {
+  if (typeof value === "string") {
+    const normalized = normalizeAgentModelRefForConfig(value);
+    return normalized === value ? value : normalized;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const raw = value as Record<string, unknown>;
+  let mutated = false;
+  const next: Record<string, unknown> = { ...raw };
+  if (typeof raw.primary === "string") {
+    const primary = normalizeAgentModelRefForConfig(raw.primary);
+    if (primary !== raw.primary) {
+      next.primary = primary;
+      mutated = true;
+    }
+  }
+  if (Array.isArray(raw.fallbacks)) {
+    const rawFallbacks = raw.fallbacks;
+    const fallbacks = rawFallbacks.map((fallback) =>
+      typeof fallback === "string" ? normalizeAgentModelRefForConfig(fallback) : fallback,
+    );
+    if (fallbacks.some((fallback, index) => fallback !== rawFallbacks[index])) {
+      next.fallbacks = fallbacks;
+      mutated = true;
+    }
+  }
+  return mutated ? next : value;
+}
+
+export function applyAgentDefaults(cfg: OpenClawConfig): OpenClawConfig {
   const agents = cfg.agents;
   const defaults = agents?.defaults;
   const hasMax =
@@ -246,7 +408,12 @@ export function applyAgentDefaults(cfg: MoltbotConfig): MoltbotConfig {
   const hasSubMax =
     typeof defaults?.subagents?.maxConcurrent === "number" &&
     Number.isFinite(defaults.subagents.maxConcurrent);
-  if (hasMax && hasSubMax) return cfg;
+  const hasSubArchive =
+    typeof defaults?.subagents?.archiveAfterMinutes === "number" &&
+    Number.isFinite(defaults.subagents.archiveAfterMinutes);
+  if (hasMax && hasSubMax && hasSubArchive) {
+    return cfg;
+  }
 
   let mutated = false;
   const nextDefaults = defaults ? { ...defaults } : {};
@@ -260,8 +427,14 @@ export function applyAgentDefaults(cfg: MoltbotConfig): MoltbotConfig {
     nextSubagents.maxConcurrent = DEFAULT_SUBAGENT_MAX_CONCURRENT;
     mutated = true;
   }
+  if (!hasSubArchive) {
+    nextSubagents.archiveAfterMinutes = DEFAULT_SUBAGENT_ARCHIVE_AFTER_MINUTES;
+    mutated = true;
+  }
 
-  if (!mutated) return cfg;
+  if (!mutated) {
+    return cfg;
+  }
 
   return {
     ...cfg,
@@ -275,10 +448,28 @@ export function applyAgentDefaults(cfg: MoltbotConfig): MoltbotConfig {
   };
 }
 
-export function applyLoggingDefaults(cfg: MoltbotConfig): MoltbotConfig {
+export function applyCronDefaults(cfg: OpenClawConfig): OpenClawConfig {
+  const raw = cfg.cron?.maxConcurrentRuns;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    cron: {
+      ...cfg.cron,
+      maxConcurrentRuns: DEFAULT_CRON_MAX_CONCURRENT_RUNS,
+    },
+  };
+}
+
+export function applyLoggingDefaults(cfg: OpenClawConfig): OpenClawConfig {
   const logging = cfg.logging;
-  if (!logging) return cfg;
-  if (logging.redactSensitive) return cfg;
+  if (!logging) {
+    return cfg;
+  }
+  if (logging.redactSensitive) {
+    return cfg;
+  }
   return {
     ...cfg,
     logging: {
@@ -288,92 +479,61 @@ export function applyLoggingDefaults(cfg: MoltbotConfig): MoltbotConfig {
   };
 }
 
-export function applyContextPruningDefaults(cfg: MoltbotConfig): MoltbotConfig {
-  const defaults = cfg.agents?.defaults;
-  if (!defaults) return cfg;
-
-  const authMode = resolveAnthropicDefaultAuthMode(cfg);
-  if (!authMode) return cfg;
-
-  let mutated = false;
-  const nextDefaults = { ...defaults };
-  const contextPruning = defaults.contextPruning ?? {};
-  const heartbeat = defaults.heartbeat ?? {};
-
-  if (defaults.contextPruning?.mode === undefined) {
-    nextDefaults.contextPruning = {
-      ...contextPruning,
-      mode: "cache-ttl",
-      ttl: defaults.contextPruning?.ttl ?? "1h",
-    };
-    mutated = true;
+function hasAnthropicDefaultSignal(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): boolean {
+  if (env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_OAUTH_TOKEN?.trim()) {
+    return true;
   }
-
-  if (defaults.heartbeat?.every === undefined) {
-    nextDefaults.heartbeat = {
-      ...heartbeat,
-      every: authMode === "oauth" ? "1h" : "30m",
-    };
-    mutated = true;
-  }
-
-  if (authMode === "api_key") {
-    const nextModels = defaults.models ? { ...defaults.models } : {};
-    let modelsMutated = false;
-
-    for (const [key, entry] of Object.entries(nextModels)) {
-      const parsed = parseModelRef(key, "anthropic");
-      if (!parsed || parsed.provider !== "anthropic") continue;
-      const current = entry ?? {};
-      const params = (current as { params?: Record<string, unknown> }).params ?? {};
-      if (typeof params.cacheControlTtl === "string") continue;
-      nextModels[key] = {
-        ...(current as Record<string, unknown>),
-        params: { ...params, cacheControlTtl: "1h" },
-      };
-      modelsMutated = true;
-    }
-
-    const primary = resolvePrimaryModelRef(defaults.model?.primary ?? undefined);
-    if (primary) {
-      const parsedPrimary = parseModelRef(primary, "anthropic");
-      if (parsedPrimary?.provider === "anthropic") {
-        const key = `${parsedPrimary.provider}/${parsedPrimary.model}`;
-        const entry = nextModels[key];
-        const current = entry ?? {};
-        const params = (current as { params?: Record<string, unknown> }).params ?? {};
-        if (typeof params.cacheControlTtl !== "string") {
-          nextModels[key] = {
-            ...(current as Record<string, unknown>),
-            params: { ...params, cacheControlTtl: "1h" },
-          };
-          modelsMutated = true;
-        }
+  const profiles = cfg.auth?.profiles;
+  if (profiles) {
+    for (const profile of Object.values(profiles)) {
+      const provider = normalizeProviderId(profile?.provider);
+      if (provider === "anthropic" || provider === "claude-cli") {
+        return true;
       }
     }
-
-    if (modelsMutated) {
-      nextDefaults.models = nextModels;
-      mutated = true;
-    }
   }
-
-  if (!mutated) return cfg;
-
-  return {
-    ...cfg,
-    agents: {
-      ...cfg.agents,
-      defaults: nextDefaults,
-    },
-  };
+  const order = cfg.auth?.order;
+  if (!order) {
+    return false;
+  }
+  return Object.keys(order).some((provider) => {
+    const normalizedProvider = normalizeProviderId(provider);
+    if (normalizedProvider !== "anthropic" && normalizedProvider !== "claude-cli") {
+      return false;
+    }
+    return (order as Record<string, unknown>)[provider] !== undefined;
+  });
 }
 
-export function applyCompactionDefaults(cfg: MoltbotConfig): MoltbotConfig {
+export function applyContextPruningDefaults(
+  cfg: OpenClawConfig,
+  options: ProviderPolicyDefaultsOptions = {},
+): OpenClawConfig {
+  if (!cfg.agents?.defaults) {
+    return cfg;
+  }
+  if (!hasAnthropicDefaultSignal(cfg, process.env)) {
+    return cfg;
+  }
+  return (
+    applyProviderConfigDefaultsForConfig({
+      provider: "anthropic",
+      config: cfg,
+      env: process.env,
+      manifestRegistry: options.manifestRegistry,
+    }) ?? cfg
+  );
+}
+
+export function applyCompactionDefaults(cfg: OpenClawConfig): OpenClawConfig {
   const defaults = cfg.agents?.defaults;
-  if (!defaults) return cfg;
+  if (!defaults) {
+    return cfg;
+  }
   const compaction = defaults?.compaction;
-  if (compaction?.mode) return cfg;
+  if (compaction?.mode) {
+    return cfg;
+  }
 
   return {
     ...cfg,
@@ -388,8 +548,4 @@ export function applyCompactionDefaults(cfg: MoltbotConfig): MoltbotConfig {
       },
     },
   };
-}
-
-export function resetSessionDefaultsWarningForTests() {
-  defaultWarnState = { warned: false };
 }

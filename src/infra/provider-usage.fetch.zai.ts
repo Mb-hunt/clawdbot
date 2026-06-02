@@ -1,4 +1,8 @@
-import { fetchJson } from "./provider-usage.fetch.shared.js";
+import {
+  buildUsageHttpErrorSnapshot,
+  fetchJson,
+  readUsageJson,
+} from "./provider-usage.fetch.shared.js";
 import { clampPercent, PROVIDER_LABELS } from "./provider-usage.shared.js";
 import type { ProviderUsageSnapshot, UsageWindow } from "./provider-usage.types.js";
 
@@ -38,21 +42,24 @@ export async function fetchZaiUsage(
   );
 
   if (!res.ok) {
-    return {
+    return buildUsageHttpErrorSnapshot({
       provider: "zai",
-      displayName: PROVIDER_LABELS.zai,
-      windows: [],
-      error: `HTTP ${res.status}`,
-    };
+      status: res.status,
+    });
   }
 
-  const data = (await res.json()) as ZaiUsageResponse;
+  const parsed = await readUsageJson("zai", res);
+  if (!parsed.ok) {
+    return parsed.snapshot;
+  }
+  const data = parsed.data as ZaiUsageResponse;
   if (!data.success || data.code !== 200) {
+    const errorMessage = typeof data.msg === "string" ? data.msg.trim() : "";
     return {
       provider: "zai",
       displayName: PROVIDER_LABELS.zai,
       windows: [],
-      error: data.msg || "API error",
+      error: errorMessage || "API error",
     };
   }
 
@@ -63,9 +70,13 @@ export async function fetchZaiUsage(
     const percent = clampPercent(limit.percentage || 0);
     const nextReset = limit.nextResetTime ? new Date(limit.nextResetTime).getTime() : undefined;
     let windowLabel = "Limit";
-    if (limit.unit === 1) windowLabel = `${limit.number}d`;
-    else if (limit.unit === 3) windowLabel = `${limit.number}h`;
-    else if (limit.unit === 5) windowLabel = `${limit.number}m`;
+    if (limit.unit === 1) {
+      windowLabel = `${limit.number}d`;
+    } else if (limit.unit === 3) {
+      windowLabel = `${limit.number}h`;
+    } else if (limit.unit === 5) {
+      windowLabel = `${limit.number}m`;
+    }
 
     if (limit.type === "TOKENS_LIMIT") {
       windows.push({

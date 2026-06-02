@@ -2,10 +2,8 @@
 summary: "TypeBox schemas as the single source of truth for the gateway protocol"
 read_when:
   - Updating protocol schemas or codegen
+title: "TypeBox"
 ---
-# TypeBox as protocol source of truth
-
-Last updated: 2026-01-10
 
 TypeBox is a TypeScript-first schema library. We use it to define the **Gateway
 WebSocket protocol** (handshake, request/response, server events). Those schemas
@@ -40,30 +38,33 @@ Client                    Gateway
 
 Common methods + events:
 
-| Category | Examples | Notes |
-| --- | --- | --- |
-| Core | `connect`, `health`, `status` | `connect` must be first |
-| Messaging | `send`, `poll`, `agent`, `agent.wait` | side-effects need `idempotencyKey` |
-| Chat | `chat.history`, `chat.send`, `chat.abort`, `chat.inject` | WebChat uses these |
-| Sessions | `sessions.list`, `sessions.patch`, `sessions.delete` | session admin |
-| Nodes | `node.list`, `node.invoke`, `node.pair.*` | Gateway WS + node actions |
-| Events | `tick`, `presence`, `agent`, `chat`, `health`, `shutdown` | server push |
+| Category   | Examples                                                   | Notes                              |
+| ---------- | ---------------------------------------------------------- | ---------------------------------- |
+| Core       | `connect`, `health`, `status`                              | `connect` must be first            |
+| Messaging  | `send`, `agent`, `agent.wait`, `system-event`, `logs.tail` | side-effects need `idempotencyKey` |
+| Chat       | `chat.history`, `chat.send`, `chat.abort`                  | WebChat uses these                 |
+| Sessions   | `sessions.list`, `sessions.patch`, `sessions.delete`       | session admin                      |
+| Automation | `wake`, `cron.list`, `cron.run`, `cron.runs`               | wake + cron control                |
+| Nodes      | `node.list`, `node.invoke`, `node.pair.*`                  | Gateway WS + node actions          |
+| Events     | `tick`, `presence`, `agent`, `chat`, `health`, `shutdown`  | server push                        |
 
-Authoritative list lives in `src/gateway/server.ts` (`METHODS`, `EVENTS`).
+Authoritative advertised **discovery** inventory lives in
+`src/gateway/server-methods-list.ts` (`listGatewayMethods`, `GATEWAY_EVENTS`).
 
 ## Where the schemas live
 
-- Source: `src/gateway/protocol/schema.ts`
-- Runtime validators (AJV): `src/gateway/protocol/index.ts`
-- Server handshake + method dispatch: `src/gateway/server.ts`
+- Source: `packages/gateway-protocol/src/schema.ts`
+- Runtime validators (AJV): `packages/gateway-protocol/src/index.ts`
+- Advertised feature/discovery registry: `src/gateway/server-methods-list.ts`
+- Server handshake + method dispatch: `src/gateway/server.impl.ts`
 - Node client: `src/gateway/client.ts`
 - Generated JSON Schema: `dist/protocol.schema.json`
-- Generated Swift models: `apps/macos/Sources/MoltbotProtocol/GatewayModels.swift`
+- Generated Swift models: `apps/macos/Sources/OpenClawProtocol/GatewayModels.swift`
 
 ## Current pipeline
 
 - `pnpm protocol:gen`
-  - writes JSON Schema (draft‑07) to `dist/protocol.schema.json`
+  - writes JSON Schema (draft-07) to `dist/protocol.schema.json`
 - `pnpm protocol:gen:swift`
   - generates Swift gateway models
 - `pnpm protocol:check`
@@ -75,8 +76,13 @@ Authoritative list lives in `src/gateway/server.ts` (`METHODS`, `EVENTS`).
   accepts a `connect` request whose params match `ConnectParams`.
 - **Client side**: the JS client validates event and response frames before
   using them.
-- **Method surface**: the Gateway advertises the supported `methods` and
-  `events` in `hello-ok`.
+- **Feature discovery**: the Gateway sends a conservative `features.methods`
+  and `features.events` list in `hello-ok` from `listGatewayMethods()` and
+  `GATEWAY_EVENTS`.
+- That discovery list is not a generated dump of every callable helper in
+  `coreGatewayHandlers`; some helper RPCs are implemented in
+  `src/gateway/server-methods/*.ts` without being enumerated in the advertised
+  feature list.
 
 ## Example frames
 
@@ -88,10 +94,10 @@ Connect (first message):
   "id": "c1",
   "method": "connect",
   "params": {
-    "minProtocol": 2,
-    "maxProtocol": 2,
+    "minProtocol": 3,
+    "maxProtocol": 4,
     "client": {
-      "id": "moltbot-macos",
+      "id": "openclaw-macos",
       "displayName": "macos",
       "version": "1.0.0",
       "platform": "macos 15.1",
@@ -111,10 +117,15 @@ Hello-ok response:
   "ok": true,
   "payload": {
     "type": "hello-ok",
-    "protocol": 2,
+    "protocol": 4,
     "server": { "version": "dev", "connId": "ws-1" },
     "features": { "methods": ["health"], "events": ["tick"] },
-    "snapshot": { "presence": [], "health": {}, "stateVersion": { "presence": 0, "health": 0 }, "uptimeMs": 0 },
+    "snapshot": {
+      "presence": [],
+      "health": {},
+      "stateVersion": { "presence": 0, "health": 0 },
+      "uptimeMs": 0
+    },
     "policy": { "maxPayload": 1048576, "maxBufferedBytes": 1048576, "tickIntervalMs": 30000 }
   }
 }
@@ -146,22 +157,24 @@ import { WebSocket } from "ws";
 const ws = new WebSocket("ws://127.0.0.1:18789");
 
 ws.on("open", () => {
-  ws.send(JSON.stringify({
-    type: "req",
-    id: "c1",
-    method: "connect",
-    params: {
-      minProtocol: 3,
-      maxProtocol: 3,
-      client: {
-        id: "cli",
-        displayName: "example",
-        version: "dev",
-        platform: "node",
-        mode: "cli"
-      }
-    }
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "req",
+      id: "c1",
+      method: "connect",
+      params: {
+        minProtocol: 4,
+        maxProtocol: 4,
+        client: {
+          id: "cli",
+          displayName: "example",
+          version: "dev",
+          platform: "node",
+          mode: "cli",
+        },
+      },
+    }),
+  );
 });
 
 ws.on("message", (data) => {
@@ -176,13 +189,13 @@ ws.on("message", (data) => {
 });
 ```
 
-## Worked example: add a method end‑to‑end
+## Worked example: add a method end-to-end
 
 Example: add a new `system.echo` request that returns `{ ok: true, text }`.
 
-1) **Schema (source of truth)**
+1. **Schema (source of truth)**
 
-Add to `src/gateway/protocol/schema.ts`:
+Add to `packages/gateway-protocol/src/schema.ts`:
 
 ```ts
 export const SystemEchoParamsSchema = Type.Object(
@@ -208,16 +221,15 @@ export type SystemEchoParams = Static<typeof SystemEchoParamsSchema>;
 export type SystemEchoResult = Static<typeof SystemEchoResultSchema>;
 ```
 
-2) **Validation**
+2. **Validation**
 
-In `src/gateway/protocol/index.ts`, export an AJV validator:
+In `packages/gateway-protocol/src/index.ts`, export an AJV validator:
 
 ```ts
-export const validateSystemEchoParams =
-  ajv.compile<SystemEchoParams>(SystemEchoParamsSchema);
+export const validateSystemEchoParams = ajv.compile<SystemEchoParams>(SystemEchoParamsSchema);
 ```
 
-3) **Server behavior**
+3. **Server behavior**
 
 Add a handler in `src/gateway/server-methods/system.ts`:
 
@@ -231,15 +243,20 @@ export const systemHandlers: GatewayRequestHandlers = {
 ```
 
 Register it in `src/gateway/server-methods.ts` (already merges `systemHandlers`),
-then add `"system.echo"` to `METHODS` in `src/gateway/server.ts`.
+then add `"system.echo"` to `listGatewayMethods` input in
+`src/gateway/server-methods-list.ts`.
 
-4) **Regenerate**
+If the method is callable by operator or node clients, also classify it in
+`src/gateway/method-scopes.ts` so scope enforcement and `hello-ok` feature
+advertising stay aligned.
+
+4. **Regenerate**
 
 ```bash
 pnpm protocol:check
 ```
 
-5) **Tests + docs**
+5. **Tests + docs**
 
 Add a server test in `src/gateway/server.*.test.ts` and note the method in docs.
 
@@ -249,14 +266,15 @@ The Swift generator emits:
 
 - `GatewayFrame` enum with `req`, `res`, `event`, and `unknown` cases
 - Strongly typed payload structs/enums
-- `ErrorCode` values and `GATEWAY_PROTOCOL_VERSION`
+- `ErrorCode` values, `GATEWAY_PROTOCOL_VERSION`, and `GATEWAY_MIN_PROTOCOL_VERSION`
 
 Unknown frame types are preserved as raw payloads for forward compatibility.
 
 ## Versioning + compatibility
 
-- `PROTOCOL_VERSION` lives in `src/gateway/protocol/schema.ts`.
-- Clients send `minProtocol` + `maxProtocol`; the server rejects mismatches.
+- `PROTOCOL_VERSION` lives in `packages/gateway-protocol/src/version.ts`.
+- Clients send `minProtocol` + `maxProtocol`; the server rejects ranges that
+  do not include its current protocol.
 - The Swift models keep unknown frame types to avoid breaking older clients.
 
 ## Schema patterns and conventions
@@ -266,16 +284,26 @@ Unknown frame types are preserved as raw payloads for forward compatibility.
 - The top-level `GatewayFrame` uses a **discriminator** on `type`.
 - Methods with side effects usually require an `idempotencyKey` in params
   (example: `send`, `poll`, `agent`, `chat.send`).
+- `agent` accepts optional `internalEvents` for runtime-generated orchestration context
+  (for example subagent/cron task completion handoff); treat this as internal API surface.
 
 ## Live schema JSON
 
 Generated JSON Schema is in the repo at `dist/protocol.schema.json`. The
 published raw file is typically available at:
 
-- https://raw.githubusercontent.com/moltbot/moltbot/main/dist/protocol.schema.json
+- [https://raw.githubusercontent.com/openclaw/openclaw/main/dist/protocol.schema.json](https://raw.githubusercontent.com/openclaw/openclaw/main/dist/protocol.schema.json)
 
 ## When you change schemas
 
-1) Update the TypeBox schemas.
-2) Run `pnpm protocol:check`.
-3) Commit the regenerated schema + Swift models.
+1. Update the TypeBox schemas.
+2. Register the method/event in `src/gateway/server-methods-list.ts`.
+3. Update `src/gateway/method-scopes.ts` when the new RPC needs operator or
+   node scope classification.
+4. Run `pnpm protocol:check`.
+5. Commit the regenerated schema + Swift models.
+
+## Related
+
+- [Rich output protocol](/reference/rich-output-protocol)
+- [RPC adapters](/reference/rpc)

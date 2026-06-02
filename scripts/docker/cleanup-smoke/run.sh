@@ -3,30 +3,42 @@ set -euo pipefail
 
 cd /repo
 
-export CLAWDBOT_STATE_DIR="/tmp/moltbot-test"
-export CLAWDBOT_CONFIG_PATH="${CLAWDBOT_STATE_DIR}/moltbot.json"
+export OPENCLAW_STATE_DIR="/tmp/openclaw-test"
+export OPENCLAW_CONFIG_PATH="${OPENCLAW_STATE_DIR}/openclaw.json"
+
+echo "==> Build"
+if ! pnpm build >/tmp/openclaw-cleanup-build.log 2>&1; then
+  cat /tmp/openclaw-cleanup-build.log
+  exit 1
+fi
 
 echo "==> Seed state"
-mkdir -p "${CLAWDBOT_STATE_DIR}/credentials"
-mkdir -p "${CLAWDBOT_STATE_DIR}/agents/main/sessions"
-echo '{}' >"${CLAWDBOT_CONFIG_PATH}"
-echo 'creds' >"${CLAWDBOT_STATE_DIR}/credentials/marker.txt"
-echo 'session' >"${CLAWDBOT_STATE_DIR}/agents/main/sessions/sessions.json"
+mkdir -p "${OPENCLAW_STATE_DIR}/credentials"
+mkdir -p "${OPENCLAW_STATE_DIR}/agents/main/sessions"
+echo '{}' >"${OPENCLAW_CONFIG_PATH}"
+echo 'creds' >"${OPENCLAW_STATE_DIR}/credentials/marker.txt"
+echo 'session' >"${OPENCLAW_STATE_DIR}/agents/main/sessions/sessions.json"
 
 echo "==> Reset (config+creds+sessions)"
-pnpm moltbot reset --scope config+creds+sessions --yes --non-interactive
+if ! pnpm openclaw reset --scope config+creds+sessions --yes --non-interactive >/tmp/openclaw-cleanup-reset.log 2>&1; then
+  cat /tmp/openclaw-cleanup-reset.log
+  exit 1
+fi
 
-test ! -f "${CLAWDBOT_CONFIG_PATH}"
-test ! -d "${CLAWDBOT_STATE_DIR}/credentials"
-test ! -d "${CLAWDBOT_STATE_DIR}/agents/main/sessions"
+test ! -f "${OPENCLAW_CONFIG_PATH}"
+test ! -d "${OPENCLAW_STATE_DIR}/credentials"
+test ! -d "${OPENCLAW_STATE_DIR}/agents/main/sessions"
 
 echo "==> Recreate minimal config"
-mkdir -p "${CLAWDBOT_STATE_DIR}/credentials"
-echo '{}' >"${CLAWDBOT_CONFIG_PATH}"
+mkdir -p "${OPENCLAW_STATE_DIR}/credentials"
+echo '{}' >"${OPENCLAW_CONFIG_PATH}"
 
 echo "==> Uninstall (state only)"
-pnpm moltbot uninstall --state --yes --non-interactive
+if ! pnpm openclaw uninstall --state --yes --non-interactive >/tmp/openclaw-cleanup-uninstall.log 2>&1; then
+  cat /tmp/openclaw-cleanup-uninstall.log
+  exit 1
+fi
 
-test ! -d "${CLAWDBOT_STATE_DIR}"
+test ! -d "${OPENCLAW_STATE_DIR}"
 
 echo "OK"

@@ -1,40 +1,94 @@
-import { getChannelDock } from "../channels/dock.js";
+import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { getChannelPlugin, listChannelPlugins } from "../channels/plugins/index.js";
-import { normalizeAnyChannelId } from "../channels/registry.js";
+import {
+  createMessageActionDiscoveryContext,
+  resolveMessageActionDiscoveryForPlugin,
+  resolveMessageActionDiscoveryChannelId,
+  resolveCurrentChannelMessageToolDiscoveryAdapter,
+  testing as messageActionTesting,
+} from "../channels/plugins/message-action-discovery.js";
+import {
+  channelPluginHasNativeApprovalPromptUi,
+  NATIVE_APPROVAL_PROMPT_RUNTIME_CAPABILITY,
+} from "../channels/plugins/native-approval-prompt.js";
 import type {
   ChannelAgentTool,
   ChannelMessageActionName,
-  ChannelPlugin,
-} from "../channels/plugins/types.js";
-import type { MoltbotConfig } from "../config/config.js";
-import { defaultRuntime } from "../runtime.js";
+} from "../channels/plugins/types.public.js";
+import { normalizeAnyChannelId } from "../channels/registry.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+
+type ChannelAgentToolMeta = {
+  channelId: string;
+};
+
+type ChannelMessageActionDiscoveryParams = {
+  cfg?: OpenClawConfig;
+  currentChannelId?: string | null;
+  currentThreadTs?: string | null;
+  currentMessageId?: string | number | null;
+  accountId?: string | null;
+  sessionKey?: string | null;
+  sessionId?: string | null;
+  agentId?: string | null;
+  requesterSenderId?: string | null;
+};
+
+const channelAgentToolMeta = new WeakMap<ChannelAgentTool, ChannelAgentToolMeta>();
+
+export function getChannelAgentToolMeta(tool: ChannelAgentTool): ChannelAgentToolMeta | undefined {
+  return channelAgentToolMeta.get(tool);
+}
+
+export function copyChannelAgentToolMeta(source: ChannelAgentTool, target: ChannelAgentTool): void {
+  const meta = channelAgentToolMeta.get(source);
+  if (meta) {
+    channelAgentToolMeta.set(target, meta);
+  }
+}
 
 /**
  * Get the list of supported message actions for a specific channel.
  * Returns an empty array if channel is not found or has no actions configured.
  */
-export function listChannelSupportedActions(params: {
-  cfg?: MoltbotConfig;
-  channel?: string;
-}): ChannelMessageActionName[] {
-  if (!params.channel) return [];
-  const plugin = getChannelPlugin(params.channel as Parameters<typeof getChannelPlugin>[0]);
-  if (!plugin?.actions?.listActions) return [];
-  const cfg = params.cfg ?? ({} as MoltbotConfig);
-  return runPluginListActions(plugin, cfg);
+export function listChannelSupportedActions(
+  params: ChannelMessageActionDiscoveryParams & {
+    channel?: string;
+  },
+): ChannelMessageActionName[] {
+  const channelId = resolveMessageActionDiscoveryChannelId(params.channel);
+  if (!channelId) {
+    return [];
+  }
+  const pluginActions = resolveCurrentChannelMessageToolDiscoveryAdapter(channelId);
+  if (!pluginActions?.actions) {
+    return [];
+  }
+  return resolveMessageActionDiscoveryForPlugin({
+    pluginId: pluginActions.pluginId,
+    actions: pluginActions.actions,
+    context: createMessageActionDiscoveryContext(params),
+    includeActions: true,
+  }).actions;
 }
 
 /**
  * Get the list of all supported message actions across all configured channels.
  */
-export function listAllChannelSupportedActions(params: {
-  cfg?: MoltbotConfig;
-}): ChannelMessageActionName[] {
+export function listAllChannelSupportedActions(
+  params: ChannelMessageActionDiscoveryParams,
+): ChannelMessageActionName[] {
   const actions = new Set<ChannelMessageActionName>();
   for (const plugin of listChannelPlugins()) {
-    if (!plugin.actions?.listActions) continue;
-    const cfg = params.cfg ?? ({} as MoltbotConfig);
-    const channelActions = runPluginListActions(plugin, cfg);
+    const channelActions = resolveMessageActionDiscoveryForPlugin({
+      pluginId: plugin.id,
+      actions: plugin.actions,
+      context: createMessageActionDiscoveryContext({
+        ...params,
+        currentChannelProvider: plugin.id,
+      }),
+      includeActions: true,
+    }).actions;
     for (const action of channelActions) {
       actions.add(action);
     }
@@ -42,62 +96,93 @@ export function listAllChannelSupportedActions(params: {
   return Array.from(actions);
 }
 
-export function listChannelAgentTools(params: { cfg?: MoltbotConfig }): ChannelAgentTool[] {
+export function listChannelAgentTools(params: { cfg?: OpenClawConfig }): ChannelAgentTool[] {
   // Channel docking: aggregate channel-owned tools (login, etc.).
   const tools: ChannelAgentTool[] = [];
   for (const plugin of listChannelPlugins()) {
     const entry = plugin.agentTools;
-    if (!entry) continue;
+    if (!entry) {
+      continue;
+    }
     const resolved = typeof entry === "function" ? entry(params) : entry;
-    if (Array.isArray(resolved)) tools.push(...resolved);
+    if (Array.isArray(resolved)) {
+      for (const tool of resolved) {
+        channelAgentToolMeta.set(tool, { channelId: plugin.id });
+      }
+      tools.push(...resolved);
+    }
   }
   return tools;
 }
 
 export function resolveChannelMessageToolHints(params: {
-  cfg?: MoltbotConfig;
+  cfg?: OpenClawConfig;
   channel?: string | null;
   accountId?: string | null;
 }): string[] {
   const channelId = normalizeAnyChannelId(params.channel);
-  if (!channelId) return [];
-  const dock = getChannelDock(channelId);
-  const resolve = dock?.agentPrompt?.messageToolHints;
-  if (!resolve) return [];
-  const cfg = params.cfg ?? ({} as MoltbotConfig);
-  return (resolve({ cfg, accountId: params.accountId }) ?? [])
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-const loggedListActionErrors = new Set<string>();
-
-function runPluginListActions(
-  plugin: ChannelPlugin,
-  cfg: MoltbotConfig,
-): ChannelMessageActionName[] {
-  if (!plugin.actions?.listActions) return [];
-  try {
-    const listed = plugin.actions.listActions({ cfg });
-    return Array.isArray(listed) ? listed : [];
-  } catch (err) {
-    logListActionsError(plugin.id, err);
+  if (!channelId) {
     return [];
   }
+  const resolve = getChannelPlugin(channelId)?.agentPrompt?.messageToolHints;
+  if (!resolve) {
+    return [];
+  }
+  const cfg = params.cfg ?? ({} as OpenClawConfig);
+  return normalizeStringEntries(resolve({ cfg, accountId: params.accountId }));
 }
 
-function logListActionsError(pluginId: string, err: unknown) {
-  const message = err instanceof Error ? err.message : String(err);
-  const key = `${pluginId}:${message}`;
-  if (loggedListActionErrors.has(key)) return;
-  loggedListActionErrors.add(key);
-  const stack = err instanceof Error && err.stack ? err.stack : null;
-  const details = stack ?? message;
-  defaultRuntime.error?.(`[channel-tools] ${pluginId}.actions.listActions failed: ${details}`);
+export function resolveChannelPromptCapabilities(params: {
+  cfg?: OpenClawConfig;
+  channel?: string | null;
+  accountId?: string | null;
+}): string[] {
+  const channelId = normalizeAnyChannelId(params.channel);
+  if (!channelId) {
+    return [];
+  }
+  const plugin = getChannelPlugin(channelId);
+  const cfg = params.cfg ?? ({} as OpenClawConfig);
+  const capabilities = normalizePromptCapabilities(
+    plugin?.agentPrompt?.messageToolCapabilities?.({ cfg, accountId: params.accountId }),
+  );
+  if (channelPluginHasNativeApprovalPromptUi(plugin)) {
+    capabilities.push(NATIVE_APPROVAL_PROMPT_RUNTIME_CAPABILITY);
+  }
+  return capabilities;
 }
 
-export const __testing = {
+function normalizePromptCapabilities(capabilities?: readonly string[] | null): string[] {
+  return normalizeStringEntries(capabilities ?? []);
+}
+
+export function resolveChannelReactionGuidance(params: {
+  cfg?: OpenClawConfig;
+  channel?: string | null;
+  accountId?: string | null;
+}): { level: "minimal" | "extensive"; channel: string } | undefined {
+  const channelId = normalizeAnyChannelId(params.channel);
+  if (!channelId) {
+    return undefined;
+  }
+  const resolve = getChannelPlugin(channelId)?.agentPrompt?.reactionGuidance;
+  if (!resolve) {
+    return undefined;
+  }
+  const cfg = params.cfg ?? ({} as OpenClawConfig);
+  const resolved = resolve({ cfg, accountId: params.accountId });
+  if (!resolved?.level) {
+    return undefined;
+  }
+  return {
+    level: resolved.level,
+    channel: resolved.channelLabel?.trim() || channelId,
+  };
+}
+
+export const testing = {
   resetLoggedListActionErrors() {
-    loggedListActionErrors.clear();
+    messageActionTesting.resetLoggedMessageActionErrors();
   },
 };
+export { testing as __testing };

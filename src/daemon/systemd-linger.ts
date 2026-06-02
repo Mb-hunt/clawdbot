@@ -1,9 +1,16 @@
 import os from "node:os";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
+import { formatErrorMessage } from "../infra/errors.js";
 import { runCommandWithTimeout, runExec } from "../process/exec.js";
 
 function resolveLoginctlUser(env: Record<string, string | undefined>): string | null {
-  const fromEnv = env.USER?.trim() || env.LOGNAME?.trim();
-  if (fromEnv) return fromEnv;
+  const fromEnv = normalizeOptionalString(env.USER) || normalizeOptionalString(env.LOGNAME);
+  if (fromEnv) {
+    return fromEnv;
+  }
   try {
     return os.userInfo().username;
   } catch {
@@ -11,7 +18,7 @@ function resolveLoginctlUser(env: Record<string, string | undefined>): string | 
   }
 }
 
-export type SystemdUserLingerStatus = {
+type SystemdUserLingerStatus = {
   user: string;
   linger: "yes" | "no";
 };
@@ -20,7 +27,9 @@ export async function readSystemdUserLingerStatus(
   env: Record<string, string | undefined>,
 ): Promise<SystemdUserLingerStatus | null> {
   const user = resolveLoginctlUser(env);
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
   try {
     const { stdout } = await runExec("loginctl", ["show-user", user, "-p", "Linger"], {
       timeoutMs: 5_000,
@@ -29,7 +38,7 @@ export async function readSystemdUserLingerStatus(
       .split("\n")
       .map((entry) => entry.trim())
       .find((entry) => entry.startsWith("Linger="));
-    const value = line?.split("=")[1]?.trim().toLowerCase();
+    const value = normalizeOptionalLowercaseString(line?.split("=")[1]);
     if (value === "yes" || value === "no") {
       return { user, linger: value };
     }
@@ -63,7 +72,7 @@ export async function enableSystemdUserLinger(params: {
       code: result.code ?? 1,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatErrorMessage(error);
     return { ok: false, stdout: "", stderr: message, code: 1 };
   }
 }

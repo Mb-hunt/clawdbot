@@ -1,4 +1,6 @@
-import type { MoltbotPluginApi, LineChannelData, ReplyPayload } from "clawdbot/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   createActionCard,
   createImageCard,
@@ -7,7 +9,8 @@ import {
   createReceiptCard,
   type CardAction,
   type ListItem,
-} from "clawdbot/plugin-sdk";
+} from "./flex-templates.js";
+import type { LineChannelData } from "./types.js";
 
 const CARD_USAGE = `Usage: /card <type> "title" "body" [options]
 
@@ -38,7 +41,9 @@ function buildLineReply(lineData: LineChannelData): ReplyPayload {
  * Data can be a URL (uri action) or plain text (message action) or key=value (postback)
  */
 function parseActions(actionsStr: string | undefined): CardAction[] {
-  if (!actionsStr) return [];
+  if (!actionsStr) {
+    return [];
+  }
 
   const results: CardAction[] = [];
 
@@ -47,7 +52,9 @@ function parseActions(actionsStr: string | undefined): CardAction[] {
       .trim()
       .split("|")
       .map((s) => s.trim());
-    if (!label) continue;
+    if (!label) {
+      continue;
+    }
 
     const actionData = data || label;
 
@@ -116,11 +123,12 @@ function parseReceiptItems(itemsStr: string): Array<{ name: string; value: strin
  * Parse quoted arguments from command string
  * Supports: /card type "arg1" "arg2" "arg3" --flag value
  */
-function parseCardArgs(argsStr: string): {
+function parseCardArgs(argsStrInput: string): {
   type: string;
   args: string[];
   flags: Record<string, string>;
 } {
+  let argsStr = argsStrInput;
   const result: { type: string; args: string[]; flags: Record<string, string> } = {
     type: "",
     args: [],
@@ -130,7 +138,7 @@ function parseCardArgs(argsStr: string): {
   // Extract type (first word)
   const typeMatch = argsStr.match(/^(\w+)/);
   if (typeMatch) {
-    result.type = typeMatch[1].toLowerCase();
+    result.type = normalizeLowercaseStringOrEmpty(typeMatch[1]);
     argsStr = argsStr.slice(typeMatch[0].length).trim();
   }
 
@@ -150,7 +158,7 @@ function parseCardArgs(argsStr: string): {
   return result;
 }
 
-export function registerLineCardCommand(api: MoltbotPluginApi): void {
+export function registerLineCardCommand(api: OpenClawPluginApi): void {
   api.registerCommand({
     name: "card",
     description: "Send a rich card message (LINE).",
@@ -158,12 +166,16 @@ export function registerLineCardCommand(api: MoltbotPluginApi): void {
     requireAuth: false,
     handler: async (ctx) => {
       const argsStr = ctx.args?.trim() ?? "";
-      if (!argsStr) return { text: CARD_USAGE };
+      if (!argsStr) {
+        return { text: CARD_USAGE };
+      }
 
       const parsed = parseCardArgs(argsStr);
       const { type, args, flags } = parsed;
 
-      if (!type) return { text: CARD_USAGE };
+      if (!type) {
+        return { text: CARD_USAGE };
+      }
 
       // Only LINE supports rich cards; fallback to text elsewhere.
       if (ctx.channel !== "line") {
@@ -221,8 +233,7 @@ export function registerLineCardCommand(api: MoltbotPluginApi): void {
             const items = parseListItems(itemsStr || flags.items || "");
             if (items.length === 0) {
               return {
-                text:
-                  'Error: List card requires items. Usage: /card list "Title" "Item1|Desc1,Item2|Desc2"',
+                text: 'Error: List card requires items. Usage: /card list "Title" "Item1|Desc1,Item2|Desc2"',
               };
             }
             const bubble = createListCard(title, items);
@@ -242,8 +253,7 @@ export function registerLineCardCommand(api: MoltbotPluginApi): void {
 
             if (items.length === 0) {
               return {
-                text:
-                  'Error: Receipt card requires items. Usage: /card receipt "Title" "Item1:$10,Item2:$20" --total "$30"',
+                text: 'Error: Receipt card requires items. Usage: /card receipt "Title" "Item1:$10,Item2:$20" --total "$30"',
               };
             }
 

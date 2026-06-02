@@ -1,4 +1,9 @@
-import { fetchJson } from "./provider-usage.fetch.shared.js";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import {
+  buildUsageHttpErrorSnapshot,
+  fetchJson,
+  readUsageJson,
+} from "./provider-usage.fetch.shared.js";
 import { clampPercent, PROVIDER_LABELS } from "./provider-usage.shared.js";
 import type {
   ProviderUsageSnapshot,
@@ -31,21 +36,25 @@ export async function fetchGeminiUsage(
   );
 
   if (!res.ok) {
-    return {
+    return buildUsageHttpErrorSnapshot({
       provider,
-      displayName: PROVIDER_LABELS[provider],
-      windows: [],
-      error: `HTTP ${res.status}`,
-    };
+      status: res.status,
+    });
   }
 
-  const data = (await res.json()) as GeminiUsageResponse;
+  const parsed = await readUsageJson(provider, res);
+  if (!parsed.ok) {
+    return parsed.snapshot;
+  }
+  const data = parsed.data as GeminiUsageResponse;
   const quotas: Record<string, number> = {};
 
   for (const bucket of data.buckets || []) {
     const model = bucket.modelId || "unknown";
     const frac = bucket.remainingFraction ?? 1;
-    if (!quotas[model] || frac < quotas[model]) quotas[model] = frac;
+    if (!quotas[model] || frac < quotas[model]) {
+      quotas[model] = frac;
+    }
   }
 
   const windows: UsageWindow[] = [];
@@ -55,27 +64,33 @@ export async function fetchGeminiUsage(
   let hasFlash = false;
 
   for (const [model, frac] of Object.entries(quotas)) {
-    const lower = model.toLowerCase();
+    const lower = normalizeLowercaseStringOrEmpty(model);
     if (lower.includes("pro")) {
       hasPro = true;
-      if (frac < proMin) proMin = frac;
+      if (frac < proMin) {
+        proMin = frac;
+      }
     }
     if (lower.includes("flash")) {
       hasFlash = true;
-      if (frac < flashMin) flashMin = frac;
+      if (frac < flashMin) {
+        flashMin = frac;
+      }
     }
   }
 
-  if (hasPro)
+  if (hasPro) {
     windows.push({
       label: "Pro",
       usedPercent: clampPercent((1 - proMin) * 100),
     });
-  if (hasFlash)
+  }
+  if (hasFlash) {
     windows.push({
       label: "Flash",
       usedPercent: clampPercent((1 - flashMin) * 100),
     });
+  }
 
   return { provider, displayName: PROVIDER_LABELS[provider], windows };
 }

@@ -1,21 +1,20 @@
-import { cancel, confirm, isCancel, select } from "@clack/prompts";
-
+import { cancel, confirm, isCancel } from "@clack/prompts";
+import { selectStyled } from "../../packages/terminal-core/src/prompt-select-styled.js";
 import {
-  isNixMode,
-  loadConfig,
-  resolveConfigPath,
-  resolveOAuthDir,
-  resolveStateDir,
-} from "../config/config.js";
+  stylePromptMessage,
+  stylePromptTitle,
+} from "../../packages/terminal-core/src/prompt-style.js";
+import { formatCliCommand } from "../cli/command-format.js";
+import { isNixMode } from "../config/config.js";
 import { resolveGatewayService } from "../daemon/service.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { stylePromptHint, stylePromptMessage, stylePromptTitle } from "../terminal/prompt-style.js";
-import { formatCliCommand } from "../cli/command-format.js";
+import { resolveCleanupPlanFromDisk } from "./cleanup-plan.js";
 import {
-  collectWorkspaceDirs,
-  isPathWithin,
   listAgentSessionDirs,
   removePath,
+  removeStateAndLinkedPaths,
+  removeWorkspaceAttestationPaths,
+  removeWorkspaceDirs,
 } from "./cleanup-utils.js";
 
 export type ResetScope = "config" | "config+creds+sessions" | "full";
@@ -27,31 +26,30 @@ export type ResetOptions = {
   dryRun?: boolean;
 };
 
-const selectStyled = <T>(params: Parameters<typeof select<T>>[0]) =>
-  select({
-    ...params,
-    message: stylePromptMessage(params.message),
-    options: params.options.map((opt) =>
-      opt.hint === undefined ? opt : { ...opt, hint: stylePromptHint(opt.hint) },
-    ),
-  });
-
 async function stopGatewayIfRunning(runtime: RuntimeEnv) {
-  if (isNixMode) return;
+  if (isNixMode) {
+    return;
+  }
   const service = resolveGatewayService();
-  let loaded = false;
+  let loaded;
   try {
     loaded = await service.isLoaded({ env: process.env });
   } catch (err) {
     runtime.error(`Gateway service check failed: ${String(err)}`);
     return;
   }
-  if (!loaded) return;
+  if (!loaded) {
+    return;
+  }
   try {
     await service.stop({ env: process.env, stdout: process.stdout });
   } catch (err) {
     runtime.error(`Gateway stop failed: ${String(err)}`);
   }
+}
+
+function logBackupRecommendation(runtime: RuntimeEnv) {
+  runtime.log(`Recommended first: ${formatCliCommand("openclaw backup create")}`);
 }
 
 export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
@@ -75,7 +73,7 @@ export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
         {
           value: "config",
           label: "Config only",
-          hint: "moltbot.json",
+          hint: "openclaw.json",
         },
         {
           value: "config+creds+sessions",
@@ -116,15 +114,11 @@ export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
   }
 
   const dryRun = Boolean(opts.dryRun);
-  const cfg = loadConfig();
-  const stateDir = resolveStateDir();
-  const configPath = resolveConfigPath();
-  const oauthDir = resolveOAuthDir();
-  const configInsideState = isPathWithin(configPath, stateDir);
-  const oauthInsideState = isPathWithin(oauthDir, stateDir);
-  const workspaceDirs = collectWorkspaceDirs(cfg);
+  const { stateDir, configPath, oauthDir, configInsideState, oauthInsideState, workspaceDirs } =
+    resolveCleanupPlanFromDisk();
 
   if (scope !== "config") {
+    logBackupRecommendation(runtime);
     if (dryRun) {
       runtime.log("[dry-run] stop gateway service");
     } else {
@@ -144,22 +138,18 @@ export async function resetCommand(runtime: RuntimeEnv, opts: ResetOptions) {
     for (const dir of sessionDirs) {
       await removePath(dir, runtime, { dryRun, label: dir });
     }
-    runtime.log(`Next: ${formatCliCommand("moltbot onboard --install-daemon")}`);
+    runtime.log(`Next: ${formatCliCommand("openclaw onboard --install-daemon")}`);
     return;
   }
 
   if (scope === "full") {
-    await removePath(stateDir, runtime, { dryRun, label: stateDir });
-    if (!configInsideState) {
-      await removePath(configPath, runtime, { dryRun, label: configPath });
-    }
-    if (!oauthInsideState) {
-      await removePath(oauthDir, runtime, { dryRun, label: oauthDir });
-    }
-    for (const workspace of workspaceDirs) {
-      await removePath(workspace, runtime, { dryRun, label: workspace });
-    }
-    runtime.log(`Next: ${formatCliCommand("moltbot onboard --install-daemon")}`);
-    return;
+    await removeStateAndLinkedPaths(
+      { stateDir, configPath, oauthDir, configInsideState, oauthInsideState },
+      runtime,
+      { dryRun },
+    );
+    await removeWorkspaceDirs(workspaceDirs, runtime, { dryRun });
+    await removeWorkspaceAttestationPaths(workspaceDirs, runtime, { dryRun });
+    runtime.log(`Next: ${formatCliCommand("openclaw onboard --install-daemon")}`);
   }
 }

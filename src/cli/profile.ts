@@ -1,88 +1,86 @@
 import os from "node:os";
 import path from "node:path";
-
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
+import { isValueToken } from "../infra/cli-root-options.js";
+import { resolveRequiredHomeDir } from "../infra/home-dir.js";
+import { resolveCliArgvInvocation } from "./argv-invocation.js";
 import { isValidProfileName } from "./profile-utils.js";
+import { scanCliRootOptions } from "./root-option-scan.js";
+import { takeCliRootOptionValue } from "./root-option-value.js";
 
-export type CliProfileParseResult =
+type CliProfileParseResult =
   | { ok: true; profile: string | null; argv: string[] }
   | { ok: false; error: string };
 
-function takeValue(
-  raw: string,
-  next: string | undefined,
-): {
-  value: string | null;
-  consumedNext: boolean;
-} {
-  if (raw.includes("=")) {
-    const [, value] = raw.split("=", 2);
-    const trimmed = (value ?? "").trim();
-    return { value: trimmed || null, consumedNext: false };
-  }
-  const trimmed = (next ?? "").trim();
-  return { value: trimmed || null, consumedNext: Boolean(next) };
+function isCommandLocalProfileOption(out: string[]): boolean {
+  const [primary, secondary] = resolveCliArgvInvocation(out).commandPath;
+  return primary === "qa" && secondary === "matrix";
 }
 
 export function parseCliProfileArgs(argv: string[]): CliProfileParseResult {
-  if (argv.length < 2) return { ok: true, profile: null, argv };
-
-  const out: string[] = argv.slice(0, 2);
   let profile: string | null = null;
   let sawDev = false;
-  let sawCommand = false;
 
-  const args = argv.slice(2);
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === undefined) continue;
-
-    if (sawCommand) {
-      out.push(arg);
-      continue;
-    }
-
+  const scanned = scanCliRootOptions(argv, ({ arg, args, index, out }) => {
     if (arg === "--dev") {
+      if (resolveCliArgvInvocation(out).primary === "gateway") {
+        out.push(arg);
+        return { kind: "handled" };
+      }
       if (profile && profile !== "dev") {
-        return { ok: false, error: "Cannot combine --dev with --profile" };
+        return { kind: "error", error: "Cannot combine --dev with --profile" };
       }
       sawDev = true;
       profile = "dev";
-      continue;
+      return { kind: "handled" };
     }
 
     if (arg === "--profile" || arg.startsWith("--profile=")) {
-      if (sawDev) {
-        return { ok: false, error: "Cannot combine --dev with --profile" };
+      if (isCommandLocalProfileOption(out)) {
+        out.push(arg);
+        if (arg === "--profile" && isValueToken(args[index + 1])) {
+          out.push(args[index + 1]);
+          return { kind: "handled", consumedNext: true };
+        }
+        return { kind: "handled" };
       }
-      const next = args[i + 1];
-      const { value, consumedNext } = takeValue(arg, next);
-      if (consumedNext) i += 1;
-      if (!value) return { ok: false, error: "--profile requires a value" };
+      if (sawDev) {
+        return { kind: "error", error: "Cannot combine --dev with --profile" };
+      }
+      const next = args[index + 1];
+      const { value, consumedNext } = takeCliRootOptionValue(arg, next);
+      if (!value) {
+        return { kind: "error", error: "--profile requires a value" };
+      }
       if (!isValidProfileName(value)) {
         return {
-          ok: false,
+          kind: "error",
           error: 'Invalid --profile (use letters, numbers, "_", "-" only)',
         };
       }
       profile = value;
-      continue;
+      return { kind: "handled", consumedNext };
     }
+    return { kind: "pass" };
+  });
 
-    if (!arg.startsWith("-")) {
-      sawCommand = true;
-      out.push(arg);
-      continue;
-    }
-
-    out.push(arg);
+  if (!scanned.ok) {
+    return scanned;
   }
 
-  return { ok: true, profile, argv: out };
+  return { ok: true, profile, argv: scanned.argv };
 }
 
-function resolveProfileStateDir(profile: string, homedir: () => string): string {
-  const suffix = profile.toLowerCase() === "default" ? "" : `-${profile}`;
-  return path.join(homedir(), `.clawdbot${suffix}`);
+function resolveProfileStateDir(
+  profile: string,
+  env: Record<string, string | undefined>,
+  homedir: () => string,
+): string {
+  const suffix = normalizeLowercaseStringOrEmpty(profile) === "default" ? "" : `-${profile}`;
+  return path.join(resolveRequiredHomeDir(env as NodeJS.ProcessEnv, homedir), `.openclaw${suffix}`);
 }
 
 export function applyCliProfileEnv(params: {
@@ -93,19 +91,24 @@ export function applyCliProfileEnv(params: {
   const env = params.env ?? (process.env as Record<string, string | undefined>);
   const homedir = params.homedir ?? os.homedir;
   const profile = params.profile.trim();
-  if (!profile) return;
-
-  // Convenience only: fill defaults, never override explicit env values.
-  env.CLAWDBOT_PROFILE = profile;
-
-  const stateDir = env.CLAWDBOT_STATE_DIR?.trim() || resolveProfileStateDir(profile, homedir);
-  if (!env.CLAWDBOT_STATE_DIR?.trim()) env.CLAWDBOT_STATE_DIR = stateDir;
-
-  if (!env.CLAWDBOT_CONFIG_PATH?.trim()) {
-    env.CLAWDBOT_CONFIG_PATH = path.join(stateDir, "moltbot.json");
+  if (!profile) {
+    return;
   }
 
-  if (profile === "dev" && !env.CLAWDBOT_GATEWAY_PORT?.trim()) {
-    env.CLAWDBOT_GATEWAY_PORT = "19001";
+  // Convenience only: fill defaults, never override explicit env values.
+  env.OPENCLAW_PROFILE = profile;
+
+  const existingStateDir = normalizeOptionalString(env.OPENCLAW_STATE_DIR);
+  const stateDir = existingStateDir || resolveProfileStateDir(profile, env, homedir);
+  if (!existingStateDir) {
+    env.OPENCLAW_STATE_DIR = stateDir;
+  }
+
+  if (!normalizeOptionalString(env.OPENCLAW_CONFIG_PATH)) {
+    env.OPENCLAW_CONFIG_PATH = path.join(stateDir, "openclaw.json");
+  }
+
+  if (profile === "dev" && !env.OPENCLAW_GATEWAY_PORT?.trim()) {
+    env.OPENCLAW_GATEWAY_PORT = "19001";
   }
 }

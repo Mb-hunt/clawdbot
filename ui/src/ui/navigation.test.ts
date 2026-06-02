@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-
 import {
   TAB_GROUPS,
+  SETTINGS_TABS,
   iconForTab,
   inferBasePathFromPathname,
+  isSettingsTab,
   normalizeBasePath,
   normalizePath,
   pathForTab,
@@ -11,79 +12,126 @@ import {
   tabFromPath,
   titleForTab,
   type Tab,
-} from "./navigation";
+} from "./navigation.ts";
 
-/** All valid tab identifiers derived from TAB_GROUPS */
-const ALL_TABS: Tab[] = TAB_GROUPS.flatMap((group) => group.tabs) as Tab[];
+/** All valid tab identifiers derived from visible groups plus routed settings slices. */
+const ALL_TABS: Tab[] = Array.from(
+  new Set<Tab>([...(TAB_GROUPS.flatMap((group) => group.tabs) as Tab[]), ...SETTINGS_TABS]),
+);
+
+const leadingSlashNormalizerCases = [
+  { name: "normalizeBasePath", normalize: normalizeBasePath, input: "ui", expected: "/ui" },
+  { name: "normalizePath", normalize: normalizePath, input: "chat", expected: "/chat" },
+];
 
 describe("iconForTab", () => {
-  it("returns a non-empty string for every tab", () => {
-    for (const tab of ALL_TABS) {
-      const icon = iconForTab(tab);
-      expect(icon).toBeTruthy();
-      expect(typeof icon).toBe("string");
-      expect(icon.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("returns stable icons for known tabs", () => {
-    expect(iconForTab("chat")).toBe("💬");
-    expect(iconForTab("overview")).toBe("📊");
-    expect(iconForTab("channels")).toBe("🔗");
-    expect(iconForTab("instances")).toBe("📡");
-    expect(iconForTab("sessions")).toBe("📄");
-    expect(iconForTab("cron")).toBe("⏰");
-    expect(iconForTab("skills")).toBe("⚡️");
-    expect(iconForTab("nodes")).toBe("🖥️");
-    expect(iconForTab("config")).toBe("⚙️");
-    expect(iconForTab("debug")).toBe("🐞");
-    expect(iconForTab("logs")).toBe("🧾");
+  it("returns stable icons for every tab", () => {
+    expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, iconForTab(tab)]))).toEqual({
+      chat: "messageSquare",
+      overview: "barChart",
+      activity: "activity",
+      workboard: "folder",
+      channels: "link",
+      instances: "radio",
+      sessions: "fileText",
+      usage: "barChart",
+      cron: "loader",
+      agents: "folder",
+      skills: "zap",
+      skillWorkshop: "wrench",
+      nodes: "monitor",
+      dreams: "moon",
+      config: "settings",
+      communications: "send",
+      appearance: "spark",
+      automation: "terminal",
+      mcp: "wrench",
+      infrastructure: "globe",
+      aiAgents: "brain",
+      debug: "bug",
+      logs: "scrollText",
+    });
   });
 
   it("returns a fallback icon for unknown tab", () => {
     // TypeScript won't allow this normally, but runtime could receive unexpected values
     const unknownTab = "unknown" as Tab;
-    expect(iconForTab(unknownTab)).toBe("📁");
+    expect(iconForTab(unknownTab)).toBe("folder");
   });
 });
 
 describe("titleForTab", () => {
-  it("returns a non-empty string for every tab", () => {
-    for (const tab of ALL_TABS) {
-      const title = titleForTab(tab);
-      expect(title).toBeTruthy();
-      expect(typeof title).toBe("string");
-    }
-  });
-
-  it("returns expected titles", () => {
-    expect(titleForTab("chat")).toBe("Chat");
-    expect(titleForTab("overview")).toBe("Overview");
-    expect(titleForTab("cron")).toBe("Cron Jobs");
+  it("returns expected titles for every tab", () => {
+    expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, titleForTab(tab)]))).toEqual({
+      chat: "Chat",
+      overview: "Overview",
+      activity: "Activity",
+      workboard: "Workboard",
+      channels: "Channels",
+      instances: "Instances",
+      sessions: "Sessions",
+      usage: "Usage",
+      cron: "Cron Jobs",
+      agents: "Agents",
+      skills: "Skills",
+      skillWorkshop: "Skill Workshop",
+      nodes: "Nodes",
+      dreams: "Dreaming",
+      config: "Settings",
+      communications: "Communications",
+      appearance: "Appearance",
+      automation: "Automation",
+      mcp: "MCP",
+      infrastructure: "Infrastructure",
+      aiAgents: "AI & Agents",
+      debug: "Debug",
+      logs: "Logs",
+    });
   });
 });
 
 describe("subtitleForTab", () => {
-  it("returns a string for every tab", () => {
-    for (const tab of ALL_TABS) {
-      const subtitle = subtitleForTab(tab);
-      expect(typeof subtitle).toBe("string");
-    }
+  it("returns expected subtitles for every tab", () => {
+    expect(Object.fromEntries(ALL_TABS.map((tab) => [tab, subtitleForTab(tab)]))).toEqual({
+      chat: "Gateway chat for quick interventions.",
+      overview: "Status, entry points, health.",
+      activity: "Browser-local tool activity summaries.",
+      workboard: "Agent work queue and session handoff.",
+      channels: "Channels and settings.",
+      instances: "Connected clients and nodes.",
+      sessions: "Active sessions and defaults.",
+      usage: "API usage and costs.",
+      cron: "Wakeups and recurring runs.",
+      agents: "Workspaces, tools, identities.",
+      skills: "Skills and API keys.",
+      skillWorkshop: "Review, refine, and apply proposals before they become live skills.",
+      nodes: "Paired devices and commands.",
+      dreams: "Memory dreaming, consolidation, and reflection.",
+      config: "Edit openclaw.json.",
+      communications: "Channels, messages, and audio settings.",
+      appearance: "Theme, UI, and setup wizard settings.",
+      automation: "Commands, hooks, cron, and plugins.",
+      mcp: "MCP servers, auth, tools, and diagnostics.",
+      infrastructure: "Gateway, web, browser, and media settings.",
+      aiAgents: "Agents, models, skills, tools, memory, session.",
+      debug: "Snapshots, events, RPC.",
+      logs: "Live gateway logs.",
+    });
   });
+});
 
-  it("returns descriptive subtitles", () => {
-    expect(subtitleForTab("chat")).toContain("chat session");
-    expect(subtitleForTab("config")).toContain("moltbot.json");
-  });
+describe("leading slash path normalizers", () => {
+  it.each(leadingSlashNormalizerCases)(
+    "$name adds leading slash if missing",
+    ({ expected, input, normalize }) => {
+      expect(normalize(input)).toBe(expected);
+    },
+  );
 });
 
 describe("normalizeBasePath", () => {
   it("returns empty string for falsy input", () => {
     expect(normalizeBasePath("")).toBe("");
-  });
-
-  it("adds leading slash if missing", () => {
-    expect(normalizeBasePath("ui")).toBe("/ui");
   });
 
   it("removes trailing slash", () => {
@@ -95,17 +143,13 @@ describe("normalizeBasePath", () => {
   });
 
   it("handles nested paths", () => {
-    expect(normalizeBasePath("/apps/moltbot")).toBe("/apps/moltbot");
+    expect(normalizeBasePath("/apps/openclaw")).toBe("/apps/openclaw");
   });
 });
 
 describe("normalizePath", () => {
   it("returns / for falsy input", () => {
     expect(normalizePath("")).toBe("/");
-  });
-
-  it("adds leading slash if missing", () => {
-    expect(normalizePath("chat")).toBe("/chat");
   });
 
   it("removes trailing slash except for root", () => {
@@ -122,7 +166,7 @@ describe("pathForTab", () => {
 
   it("prepends base path", () => {
     expect(pathForTab("chat", "/ui")).toBe("/ui/chat");
-    expect(pathForTab("sessions", "/apps/moltbot")).toBe("/apps/moltbot/sessions");
+    expect(pathForTab("sessions", "/apps/openclaw")).toBe("/apps/openclaw/sessions");
   });
 });
 
@@ -130,7 +174,10 @@ describe("tabFromPath", () => {
   it("returns tab for valid path", () => {
     expect(tabFromPath("/chat")).toBe("chat");
     expect(tabFromPath("/overview")).toBe("overview");
+    expect(tabFromPath("/activity")).toBe("activity");
     expect(tabFromPath("/sessions")).toBe("sessions");
+    expect(tabFromPath("/dreaming")).toBe("dreams");
+    expect(tabFromPath("/dreams")).toBe("dreams");
   });
 
   it("returns chat for root path", () => {
@@ -139,7 +186,7 @@ describe("tabFromPath", () => {
 
   it("handles base paths", () => {
     expect(tabFromPath("/ui/chat", "/ui")).toBe("chat");
-    expect(tabFromPath("/apps/moltbot/sessions", "/apps/moltbot")).toBe("sessions");
+    expect(tabFromPath("/apps/openclaw/sessions", "/apps/openclaw")).toBe("sessions");
   });
 
   it("returns null for unknown path", () => {
@@ -160,11 +207,13 @@ describe("inferBasePathFromPathname", () => {
   it("returns empty string for direct tab path", () => {
     expect(inferBasePathFromPathname("/chat")).toBe("");
     expect(inferBasePathFromPathname("/overview")).toBe("");
+    expect(inferBasePathFromPathname("/dreaming")).toBe("");
+    expect(inferBasePathFromPathname("/dreams")).toBe("");
   });
 
   it("infers base path from nested paths", () => {
     expect(inferBasePathFromPathname("/ui/chat")).toBe("/ui");
-    expect(inferBasePathFromPathname("/apps/moltbot/sessions")).toBe("/apps/moltbot");
+    expect(inferBasePathFromPathname("/apps/openclaw/sessions")).toBe("/apps/openclaw");
   });
 
   it("handles index.html suffix", () => {
@@ -175,16 +224,30 @@ describe("inferBasePathFromPathname", () => {
 
 describe("TAB_GROUPS", () => {
   it("contains all expected groups", () => {
-    const labels = TAB_GROUPS.map((g) => g.label);
-    expect(labels).toContain("Chat");
-    expect(labels).toContain("Control");
-    expect(labels).toContain("Agent");
-    expect(labels).toContain("Settings");
+    expect(TAB_GROUPS.map((g) => g.label)).toEqual(["chat", "control", "agent", "settings"]);
   });
 
   it("all tabs are unique", () => {
     const allTabs = TAB_GROUPS.flatMap((g) => g.tabs);
     const uniqueTabs = new Set(allTabs);
     expect(uniqueTabs.size).toBe(allTabs.length);
+  });
+
+  it("keeps detailed settings slices routed but out of the root sidebar", () => {
+    const settings = TAB_GROUPS.find((group) => group.label === "settings");
+    expect(settings?.tabs).toEqual(["config"]);
+    expect(SETTINGS_TABS).toEqual([
+      "config",
+      "channels",
+      "communications",
+      "appearance",
+      "automation",
+      "mcp",
+      "infrastructure",
+      "aiAgents",
+      "debug",
+      "logs",
+    ]);
+    expect(SETTINGS_TABS.every((tab) => isSettingsTab(tab))).toBe(true);
   });
 });

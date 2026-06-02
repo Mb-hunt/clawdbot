@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { load, getLoadablePath } from "sqlite-vec";
+import { formatErrorMessage } from "./lib/error-format.mjs";
 
 function vec(values) {
   return Buffer.from(new Float32Array(values).buffer);
@@ -10,7 +11,7 @@ const db = new DatabaseSync(":memory:", { allowExtension: true });
 try {
   load(db);
 } catch (err) {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = formatErrorMessage(err);
   console.error("sqlite-vec load failed:");
   console.error(message);
   console.error("expected extension path:", getLoadablePath());
@@ -31,9 +32,7 @@ insert.run("c", vec([0.2, 0.2, 0, 0]));
 
 const query = vec([1, 0, 0, 0]);
 const rows = db
-  .prepare(
-    "SELECT id, vec_distance_cosine(embedding, ?) AS dist FROM v ORDER BY dist ASC"
-  )
+  .prepare("SELECT id, vec_distance_cosine(embedding, ?) AS dist FROM v ORDER BY dist ASC")
   .all(query);
 
 console.log("sqlite-vec ok");

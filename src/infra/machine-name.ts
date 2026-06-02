@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { promisify } from "node:util";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,7 +13,7 @@ async function tryScutil(key: "ComputerName" | "LocalHostName") {
       timeout: 1000,
       windowsHide: true,
     });
-    const value = String(stdout ?? "").trim();
+    const value = normalizeOptionalString(stdout ?? "") ?? "";
     return value.length > 0 ? value : null;
   } catch {
     return null;
@@ -20,25 +21,27 @@ async function tryScutil(key: "ComputerName" | "LocalHostName") {
 }
 
 function fallbackHostName() {
-  return (
-    os
-      .hostname()
-      .replace(/\.local$/i, "")
-      .trim() || "moltbot"
-  );
+  const trimmed = normalizeOptionalString(os.hostname()) ?? "";
+  return trimmed.replace(/\.local$/i, "") || "openclaw";
 }
 
 export async function getMachineDisplayName(): Promise<string> {
-  if (cachedPromise) return cachedPromise;
+  if (cachedPromise) {
+    return cachedPromise;
+  }
   cachedPromise = (async () => {
     if (process.env.VITEST || process.env.NODE_ENV === "test") {
       return fallbackHostName();
     }
     if (process.platform === "darwin") {
       const computerName = await tryScutil("ComputerName");
-      if (computerName) return computerName;
+      if (computerName) {
+        return computerName;
+      }
       const localHostName = await tryScutil("LocalHostName");
-      if (localHostName) return localHostName;
+      if (localHostName) {
+        return localHostName;
+      }
     }
     return fallbackHostName();
   })();

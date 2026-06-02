@@ -1,17 +1,21 @@
-import { resolveAgentConfig } from "../agents/agent-scope.js";
 import {
-  resolveSandboxConfigForAgent,
-  resolveSandboxToolPolicyForAgent,
-} from "../agents/sandbox.js";
+  normalizeOptionalLowercaseString,
+  normalizeStringifiedEntries,
+} from "@openclaw/normalization-core/string-coerce";
+import { formatDocsLink } from "../../packages/terminal-core/src/links.js";
+import { colorize, isRich, theme } from "../../packages/terminal-core/src/theme.js";
+import { resolveAgentConfig } from "../agents/agent-scope.js";
+import { resolveSandboxConfigForAgent } from "../agents/sandbox.js";
+import { resolveSandboxToolPolicyForAgent } from "../agents/sandbox/tool-policy.js";
 import { normalizeAnyChannelId } from "../channels/registry.js";
-import type { MoltbotConfig } from "../config/config.js";
-import { loadConfig } from "../config/config.js";
+import { getRuntimeConfig } from "../config/config.js";
 import {
   loadSessionStore,
   resolveAgentMainSessionKey,
   resolveMainSessionKey,
   resolveStorePath,
 } from "../config/sessions.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   buildAgentMainSessionKey,
   normalizeAgentId,
@@ -19,9 +23,7 @@ import {
   parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
 } from "../routing/session-key.js";
-import type { RuntimeEnv } from "../runtime.js";
-import { formatDocsLink } from "../terminal/links.js";
-import { colorize, isRich, theme } from "../terminal/theme.js";
+import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 
 type SandboxExplainOptions = {
@@ -30,10 +32,10 @@ type SandboxExplainOptions = {
   json: boolean;
 };
 
-const SANDBOX_DOCS_URL = "https://docs.molt.bot/sandbox";
+const SANDBOX_DOCS_URL = "https://docs.openclaw.ai/sandbox";
 
 function normalizeExplainSessionKey(params: {
-  cfg: MoltbotConfig;
+  cfg: OpenClawConfig;
   agentId: string;
   session?: string;
 }): string {
@@ -44,8 +46,12 @@ function normalizeExplainSessionKey(params: {
       agentId: params.agentId,
     });
   }
-  if (raw.includes(":")) return raw;
-  if (raw === "global") return "global";
+  if (raw.includes(":")) {
+    return raw;
+  }
+  if (raw === "global") {
+    return "global";
+  }
   return buildAgentMainSessionKey({
     agentId: params.agentId,
     mainKey: normalizeMainKey(raw),
@@ -53,25 +59,37 @@ function normalizeExplainSessionKey(params: {
 }
 
 function inferProviderFromSessionKey(params: {
-  cfg: MoltbotConfig;
+  cfg: OpenClawConfig;
   sessionKey: string;
 }): string | undefined {
   const parsed = parseAgentSessionKey(params.sessionKey);
-  if (!parsed) return undefined;
+  if (!parsed) {
+    return undefined;
+  }
   const rest = parsed.rest.trim();
-  if (!rest) return undefined;
+  if (!rest) {
+    return undefined;
+  }
   const parts = rest.split(":").filter(Boolean);
-  if (parts.length === 0) return undefined;
+  if (parts.length === 0) {
+    return undefined;
+  }
   const configuredMainKey = normalizeMainKey(params.cfg.session?.mainKey);
-  if (parts[0] === configuredMainKey) return undefined;
-  const candidate = parts[0]?.trim().toLowerCase();
-  if (!candidate) return undefined;
-  if (candidate === INTERNAL_MESSAGE_CHANNEL) return INTERNAL_MESSAGE_CHANNEL;
+  if (parts[0] === configuredMainKey) {
+    return undefined;
+  }
+  const candidate = normalizeOptionalLowercaseString(parts[0]);
+  if (!candidate) {
+    return undefined;
+  }
+  if (candidate === INTERNAL_MESSAGE_CHANNEL) {
+    return INTERNAL_MESSAGE_CHANNEL;
+  }
   return normalizeAnyChannelId(candidate) ?? undefined;
 }
 
 function resolveActiveChannel(params: {
-  cfg: MoltbotConfig;
+  cfg: OpenClawConfig;
   agentId: string;
   sessionKey: string;
 }): string | undefined {
@@ -94,12 +112,21 @@ function resolveActiveChannel(params: {
     entry?.lastProvider ??
     entry?.provider ??
     ""
-  )
-    .trim()
-    .toLowerCase();
-  if (candidate === INTERNAL_MESSAGE_CHANNEL) return INTERNAL_MESSAGE_CHANNEL;
-  const normalized = normalizeAnyChannelId(candidate);
-  if (normalized) return normalized;
+  ).trim();
+  const normalizedCandidate = normalizeOptionalLowercaseString(candidate);
+  if (!normalizedCandidate) {
+    return inferProviderFromSessionKey({
+      cfg: params.cfg,
+      sessionKey: params.sessionKey,
+    });
+  }
+  if (normalizedCandidate === INTERNAL_MESSAGE_CHANNEL) {
+    return INTERNAL_MESSAGE_CHANNEL;
+  }
+  const normalized = normalizeAnyChannelId(normalizedCandidate);
+  if (normalized) {
+    return normalized;
+  }
   return inferProviderFromSessionKey({
     cfg: params.cfg,
     sessionKey: params.sessionKey,
@@ -110,7 +137,7 @@ export async function sandboxExplainCommand(
   opts: SandboxExplainOptions,
   runtime: RuntimeEnv,
 ): Promise<void> {
-  const cfg = loadConfig();
+  const cfg = getRuntimeConfig();
 
   const defaultAgentId = resolveAgentIdFromSessionKey(resolveMainSessionKey(cfg));
   const resolvedAgentId = normalizeAgentId(
@@ -156,8 +183,7 @@ export async function sandboxExplainCommand(
   const globalAllow = channel ? elevatedGlobal?.allowFrom?.[channel] : undefined;
   const agentAllow = channel ? elevatedAgent?.allowFrom?.[channel] : undefined;
 
-  const allowTokens = (values?: Array<string | number>) =>
-    (values ?? []).map((v) => String(v).trim()).filter(Boolean);
+  const allowTokens = (values?: Array<string | number>) => normalizeStringifiedEntries(values);
   const globalAllowTokens = allowTokens(globalAllow);
   const agentAllowTokens = allowTokens(agentAllow);
 
@@ -201,11 +227,15 @@ export async function sandboxExplainCommand(
     fixIt.push("agents.list[].sandbox.mode=off");
   }
   fixIt.push("tools.sandbox.tools.allow");
+  fixIt.push("tools.sandbox.tools.alsoAllow");
   fixIt.push("tools.sandbox.tools.deny");
   fixIt.push("agents.list[].tools.sandbox.tools.allow");
+  fixIt.push("agents.list[].tools.sandbox.tools.alsoAllow");
   fixIt.push("agents.list[].tools.sandbox.tools.deny");
   fixIt.push("tools.elevated.enabled");
-  if (channel) fixIt.push(`tools.elevated.allowFrom.${channel}`);
+  if (channel) {
+    fixIt.push(`tools.elevated.allowFrom.${channel}`);
+  }
 
   const payload = {
     docsUrl: SANDBOX_DOCS_URL,
@@ -215,7 +245,6 @@ export async function sandboxExplainCommand(
     sandbox: {
       mode: sandboxCfg.mode,
       scope: sandboxCfg.scope,
-      perSession: sandboxCfg.scope === "session",
       workspaceAccess: sandboxCfg.workspaceAccess,
       workspaceRoot: sandboxCfg.workspaceRoot,
       sessionIsSandboxed,
@@ -240,7 +269,7 @@ export async function sandboxExplainCommand(
   } as const;
 
   if (opts.json) {
-    runtime.log(`${JSON.stringify(payload, null, 2)}\n`);
+    writeRuntimeJson(runtime, payload);
     return;
   }
 
@@ -264,7 +293,7 @@ export async function sandboxExplainCommand(
   lines.push(
     `  ${key("mode:")} ${value(payload.sandbox.mode)} ${key("scope:")} ${value(
       payload.sandbox.scope,
-    )} ${key("perSession:")} ${bool(payload.sandbox.perSession)}`,
+    )}`,
   );
   lines.push(
     `  ${key("workspaceAccess:")} ${value(
@@ -305,9 +334,11 @@ export async function sandboxExplainCommand(
   }
   lines.push("");
   lines.push(heading("Fix-it:"));
-  for (const key of payload.fixIt) lines.push(`  - ${key}`);
+  for (const keyLocal of payload.fixIt) {
+    lines.push(`  - ${keyLocal}`);
+  }
   lines.push("");
-  lines.push(`${key("Docs:")} ${formatDocsLink("/sandbox", "docs.molt.bot/sandbox")}`);
+  lines.push(`${key("Docs:")} ${formatDocsLink("/sandbox", "docs.openclaw.ai/sandbox")}`);
 
   runtime.log(`${lines.join("\n")}\n`);
 }

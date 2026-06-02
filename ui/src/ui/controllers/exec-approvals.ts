@@ -1,5 +1,5 @@
-import type { GatewayBrowserClient } from "../gateway";
-import { cloneConfigObject, removePathValue, setPathValue } from "./config/form-utils";
+import type { GatewayBrowserClient } from "../gateway.ts";
+import { cloneConfigObject, removePathValue, setPathValue } from "./config/form-utils.ts";
 
 export type ExecApprovalsDefaults = {
   security?: string;
@@ -11,6 +11,9 @@ export type ExecApprovalsDefaults = {
 export type ExecApprovalsAllowlistEntry = {
   id?: string;
   pattern: string;
+  source?: "allow-always";
+  commandText?: string;
+  argPattern?: string;
   lastUsedAt?: number;
   lastUsedCommand?: string;
   lastResolvedPath?: string;
@@ -34,9 +37,7 @@ export type ExecApprovalsSnapshot = {
   file: ExecApprovalsFile;
 };
 
-export type ExecApprovalsTarget =
-  | { kind: "gateway" }
-  | { kind: "node"; nodeId: string };
+export type ExecApprovalsTarget = { kind: "gateway" } | { kind: "node"; nodeId: string };
 
 export type ExecApprovalsState = {
   client: GatewayBrowserClient | null;
@@ -48,6 +49,7 @@ export type ExecApprovalsState = {
   execApprovalsForm: ExecApprovalsFile | null;
   execApprovalsSelectedAgent: string | null;
   lastError: string | null;
+  chatError?: string | null;
 };
 
 function resolveExecApprovalsRpc(target?: ExecApprovalsTarget | null): {
@@ -58,7 +60,9 @@ function resolveExecApprovalsRpc(target?: ExecApprovalsTarget | null): {
     return { method: "exec.approvals.get", params: {} };
   }
   const nodeId = target.nodeId.trim();
-  if (!nodeId) return null;
+  if (!nodeId) {
+    return null;
+  }
   return { method: "exec.approvals.node.get", params: { nodeId } };
 }
 
@@ -70,7 +74,9 @@ function resolveExecApprovalsSaveRpc(
     return { method: "exec.approvals.set", params };
   }
   const nodeId = target.nodeId.trim();
-  if (!nodeId) return null;
+  if (!nodeId) {
+    return null;
+  }
   return { method: "exec.approvals.node.set", params: { ...params, nodeId } };
 }
 
@@ -78,17 +84,22 @@ export async function loadExecApprovals(
   state: ExecApprovalsState,
   target?: ExecApprovalsTarget | null,
 ) {
-  if (!state.client || !state.connected) return;
-  if (state.execApprovalsLoading) return;
+  if (!state.client || !state.connected) {
+    return;
+  }
+  if (state.execApprovalsLoading) {
+    return;
+  }
   state.execApprovalsLoading = true;
   state.lastError = null;
+  state.chatError = null;
   try {
     const rpc = resolveExecApprovalsRpc(target);
     if (!rpc) {
       state.lastError = "Select a node before loading exec approvals.";
       return;
     }
-    const res = (await state.client.request(rpc.method, rpc.params)) as ExecApprovalsSnapshot;
+    const res = await state.client.request<ExecApprovalsSnapshot>(rpc.method, rpc.params);
     applyExecApprovalsSnapshot(state, res);
   } catch (err) {
     state.lastError = String(err);
@@ -97,10 +108,7 @@ export async function loadExecApprovals(
   }
 }
 
-export function applyExecApprovalsSnapshot(
-  state: ExecApprovalsState,
-  snapshot: ExecApprovalsSnapshot,
-) {
+function applyExecApprovalsSnapshot(state: ExecApprovalsState, snapshot: ExecApprovalsSnapshot) {
   state.execApprovalsSnapshot = snapshot;
   if (!state.execApprovalsDirty) {
     state.execApprovalsForm = cloneConfigObject(snapshot.file ?? {});
@@ -111,19 +119,19 @@ export async function saveExecApprovals(
   state: ExecApprovalsState,
   target?: ExecApprovalsTarget | null,
 ) {
-  if (!state.client || !state.connected) return;
+  if (!state.client || !state.connected) {
+    return;
+  }
   state.execApprovalsSaving = true;
   state.lastError = null;
+  state.chatError = null;
   try {
     const baseHash = state.execApprovalsSnapshot?.hash;
     if (!baseHash) {
       state.lastError = "Exec approvals hash missing; reload and retry.";
       return;
     }
-    const file =
-      state.execApprovalsForm ??
-      state.execApprovalsSnapshot?.file ??
-      {};
+    const file = state.execApprovalsForm ?? state.execApprovalsSnapshot?.file ?? {};
     const rpc = resolveExecApprovalsSaveRpc(target, { file, baseHash });
     if (!rpc) {
       state.lastError = "Select a node before saving exec approvals.";

@@ -1,9 +1,19 @@
-import type { MoltbotConfig } from "clawdbot/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "clawdbot/plugin-sdk";
+import {
+  createAccountListHelpers,
+  DEFAULT_ACCOUNT_ID,
+  normalizeAccountId,
+  type OpenClawConfig,
+  resolveAccountEntry,
+  resolveMergedAccountConfig,
+} from "openclaw/plugin-sdk/account-resolution";
+import { safeParseJsonWithSchema, safeParseWithSchema } from "openclaw/plugin-sdk/extension-shared";
+import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-runtime";
+import { isSecretRef } from "openclaw/plugin-sdk/secret-input";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { z } from "zod";
+import type { GoogleChatAccountConfig } from "./types.config.js";
 
-import type { GoogleChatAccountConfig, GoogleChatConfig } from "./types.config.js";
-
-export type GoogleChatCredentialSource = "file" | "inline" | "env" | "none";
+type GoogleChatCredentialSource = "file" | "inline" | "env" | "none";
 
 export type ResolvedGoogleChatAccount = {
   accountId: string;
@@ -15,58 +25,86 @@ export type ResolvedGoogleChatAccount = {
   credentialsFile?: string;
 };
 
+export type GoogleChatConfigAccessorAccount = {
+  config: GoogleChatAccountConfig;
+};
+
 const ENV_SERVICE_ACCOUNT = "GOOGLE_CHAT_SERVICE_ACCOUNT";
 const ENV_SERVICE_ACCOUNT_FILE = "GOOGLE_CHAT_SERVICE_ACCOUNT_FILE";
+const JsonRecordSchema = z.record(z.string(), z.unknown());
 
-function listConfiguredAccountIds(cfg: MoltbotConfig): string[] {
-  const accounts = (cfg.channels?.["googlechat"] as GoogleChatConfig | undefined)?.accounts;
-  if (!accounts || typeof accounts !== "object") return [];
-  return Object.keys(accounts).filter(Boolean);
-}
-
-export function listGoogleChatAccountIds(cfg: MoltbotConfig): string[] {
-  const ids = listConfiguredAccountIds(cfg);
-  if (ids.length === 0) return [DEFAULT_ACCOUNT_ID];
-  return ids.sort((a, b) => a.localeCompare(b));
-}
-
-export function resolveDefaultGoogleChatAccountId(cfg: MoltbotConfig): string {
-  const channel = cfg.channels?.["googlechat"] as GoogleChatConfig | undefined;
-  if (channel?.defaultAccount?.trim()) return channel.defaultAccount.trim();
-  const ids = listGoogleChatAccountIds(cfg);
-  if (ids.includes(DEFAULT_ACCOUNT_ID)) return DEFAULT_ACCOUNT_ID;
-  return ids[0] ?? DEFAULT_ACCOUNT_ID;
-}
-
-function resolveAccountConfig(
-  cfg: MoltbotConfig,
-  accountId: string,
-): GoogleChatAccountConfig | undefined {
-  const accounts = (cfg.channels?.["googlechat"] as GoogleChatConfig | undefined)?.accounts;
-  if (!accounts || typeof accounts !== "object") return undefined;
-  return accounts[accountId] as GoogleChatAccountConfig | undefined;
-}
+const {
+  listAccountIds: listGoogleChatAccountIds,
+  resolveDefaultAccountId: resolveDefaultGoogleChatAccountId,
+} = createAccountListHelpers("googlechat", {
+  implicitDefaultAccount: {
+    channelKeys: ["serviceAccount", "serviceAccountRef", "serviceAccountFile"],
+    envVars: [ENV_SERVICE_ACCOUNT, ENV_SERVICE_ACCOUNT_FILE],
+  },
+});
+export { listGoogleChatAccountIds, resolveDefaultGoogleChatAccountId };
 
 function mergeGoogleChatAccountConfig(
-  cfg: MoltbotConfig,
+  cfg: OpenClawConfig,
   accountId: string,
 ): GoogleChatAccountConfig {
-  const raw = (cfg.channels?.["googlechat"] ?? {}) as GoogleChatConfig;
-  const { accounts: _ignored, defaultAccount: _ignored2, ...base } = raw;
-  const account = resolveAccountConfig(cfg, accountId) ?? {};
-  return { ...base, ...account } as GoogleChatAccountConfig;
+  const raw = cfg.channels?.["googlechat"] ?? {};
+  const base = resolveMergedAccountConfig<GoogleChatAccountConfig>({
+    channelConfig: raw as GoogleChatAccountConfig,
+    accounts: raw.accounts as Record<string, Partial<GoogleChatAccountConfig>> | undefined,
+    accountId,
+    omitKeys: ["defaultAccount"],
+    nestedObjectKeys: ["botLoopProtection"],
+  });
+  const defaultAccountConfig = resolveAccountEntry(raw.accounts, DEFAULT_ACCOUNT_ID) ?? {};
+  if (accountId === DEFAULT_ACCOUNT_ID) {
+    return base;
+  }
+  const {
+    enabled: _ignoredEnabled,
+    dangerouslyAllowNameMatching: _ignoredDangerouslyAllowNameMatching,
+    serviceAccount: _ignoredServiceAccount,
+    serviceAccountRef: _ignoredServiceAccountRef,
+    serviceAccountFile: _ignoredServiceAccountFile,
+    ...defaultAccountShared
+  } = defaultAccountConfig;
+  // In multi-account setups, allow accounts.default to provide shared defaults
+  // (for example webhook/audience fields) while preserving top-level and account overrides.
+  const botLoopProtection = mergePairLoopGuardConfig(
+    defaultAccountShared.botLoopProtection,
+    base.botLoopProtection,
+  );
+  return {
+    ...defaultAccountShared,
+    ...base,
+    ...(botLoopProtection ? { botLoopProtection } : {}),
+  } as GoogleChatAccountConfig;
+}
+
+export function resolveGoogleChatConfigAccessorAccount(params: {
+  cfg: OpenClawConfig;
+  accountId?: string | null;
+}): GoogleChatConfigAccessorAccount {
+  const accountId = normalizeAccountId(
+    params.accountId ?? params.cfg.channels?.googlechat?.defaultAccount,
+  );
+  return { config: mergeGoogleChatAccountConfig(params.cfg, accountId) };
 }
 
 function parseServiceAccount(value: unknown): Record<string, unknown> | null {
-  if (value && typeof value === "object") return value as Record<string, unknown>;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
+  if (isSecretRef(value)) {
     return null;
   }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return safeParseJsonWithSchema(JsonRecordSchema, trimmed);
+  }
+
+  return safeParseWithSchema(JsonRecordSchema, value);
 }
 
 function resolveCredentialsFromConfig(params: {
@@ -83,7 +121,19 @@ function resolveCredentialsFromConfig(params: {
     return { credentials: inline, source: "inline" };
   }
 
-  const file = account.serviceAccountFile?.trim();
+  if (isSecretRef(account.serviceAccount)) {
+    throw new Error(
+      `channels.googlechat.accounts.${accountId}.serviceAccount: unresolved SecretRef "${account.serviceAccount.source}:${account.serviceAccount.provider}:${account.serviceAccount.id}". Resolve this command against an active gateway runtime snapshot before reading it.`,
+    );
+  }
+
+  if (isSecretRef(account.serviceAccountRef)) {
+    throw new Error(
+      `channels.googlechat.accounts.${accountId}.serviceAccount: unresolved SecretRef "${account.serviceAccountRef.source}:${account.serviceAccountRef.provider}:${account.serviceAccountRef.id}". Resolve this command against an active gateway runtime snapshot before reading it.`,
+    );
+  }
+
+  const file = normalizeOptionalString(account.serviceAccountFile);
   if (file) {
     return { credentialsFile: file, source: "file" };
   }
@@ -94,7 +144,7 @@ function resolveCredentialsFromConfig(params: {
     if (envInline) {
       return { credentials: envInline, source: "env" };
     }
-    const envFile = process.env[ENV_SERVICE_ACCOUNT_FILE]?.trim();
+    const envFile = normalizeOptionalString(process.env[ENV_SERVICE_ACCOUNT_FILE]);
     if (envFile) {
       return { credentialsFile: envFile, source: "env" };
     }
@@ -104,12 +154,13 @@ function resolveCredentialsFromConfig(params: {
 }
 
 export function resolveGoogleChatAccount(params: {
-  cfg: MoltbotConfig;
+  cfg: OpenClawConfig;
   accountId?: string | null;
 }): ResolvedGoogleChatAccount {
-  const accountId = normalizeAccountId(params.accountId);
-  const baseEnabled =
-    (params.cfg.channels?.["googlechat"] as GoogleChatConfig | undefined)?.enabled !== false;
+  const accountId = normalizeAccountId(
+    params.accountId ?? params.cfg.channels?.["googlechat"]?.defaultAccount,
+  );
+  const baseEnabled = params.cfg.channels?.["googlechat"]?.enabled !== false;
   const merged = mergeGoogleChatAccountConfig(params.cfg, accountId);
   const accountEnabled = merged.enabled !== false;
   const enabled = baseEnabled && accountEnabled;
@@ -117,7 +168,7 @@ export function resolveGoogleChatAccount(params: {
 
   return {
     accountId,
-    name: merged.name?.trim() || undefined,
+    name: normalizeOptionalString(merged.name),
     enabled,
     config: merged,
     credentialSource: credentials.source,
@@ -126,7 +177,7 @@ export function resolveGoogleChatAccount(params: {
   };
 }
 
-export function listEnabledGoogleChatAccounts(cfg: MoltbotConfig): ResolvedGoogleChatAccount[] {
+export function listEnabledGoogleChatAccounts(cfg: OpenClawConfig): ResolvedGoogleChatAccount[] {
   return listGoogleChatAccountIds(cfg)
     .map((accountId) => resolveGoogleChatAccount({ cfg, accountId }))
     .filter((account) => account.enabled);

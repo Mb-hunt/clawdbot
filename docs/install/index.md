@@ -1,181 +1,232 @@
 ---
-summary: "Install Moltbot (recommended installer, global install, or from source)"
+summary: "Install OpenClaw - installer script, npm/pnpm/bun, from source, Docker, and more"
 read_when:
-  - Installing Moltbot
-  - You want to install from GitHub
+  - You need an install method other than the Getting Started quickstart
+  - You want to deploy to a cloud platform
+  - You need to update, migrate, or uninstall
+title: "Install"
 ---
-
-# Install
-
-Use the installer unless you have a reason not to. It sets up the CLI and runs onboarding.
-
-## Quick install (recommended)
-
-```bash
-curl -fsSL https://molt.bot/install.sh | bash
-```
-
-Windows (PowerShell):
-
-```powershell
-iwr -useb https://molt.bot/install.ps1 | iex
-```
-
-Next step (if you skipped onboarding):
-
-```bash
-moltbot onboard --install-daemon
-```
 
 ## System requirements
 
-- **Node >=22**
-- macOS, Linux, or Windows via WSL2
-- `pnpm` only if you build from source
+- **Node 24** (recommended) or Node 22.19+ - the installer script handles this automatically
+- **macOS, Linux, or Windows** - both native Windows and WSL2 are supported; WSL2 is more stable. See [Windows](/platforms/windows).
+- `pnpm` is only needed if you build from source
 
-## Choose your install path
+## Recommended: installer script
 
-### 1) Installer script (recommended)
+The fastest way to install. It detects your OS, installs Node if needed, installs OpenClaw, and launches onboarding.
 
-Installs `moltbot` globally via npm and runs onboarding.
+<Tabs>
+  <Tab title="macOS / Linux / WSL2">
+    ```bash
+    curl -fsSL https://openclaw.ai/install.sh | bash
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    iwr -useb https://openclaw.ai/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+To install without running onboarding:
+
+<Tabs>
+  <Tab title="macOS / Linux / WSL2">
+    ```bash
+    curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    & ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard
+    ```
+  </Tab>
+</Tabs>
+
+For all flags and CI/automation options, see [Installer internals](/install/installer).
+
+## Alternative install methods
+
+### Local prefix installer (`install-cli.sh`)
+
+Use this when you want OpenClaw and Node kept under a local prefix such as
+`~/.openclaw`, without depending on a system-wide Node install:
 
 ```bash
-curl -fsSL https://molt.bot/install.sh | bash
+curl -fsSL https://openclaw.ai/install-cli.sh | bash
 ```
 
-Installer flags:
+It supports npm installs by default, plus git-checkout installs under the same
+prefix flow. Full reference: [Installer internals](/install/installer#install-clish).
+
+Already installed? Switch between package and git installs with
+`openclaw update --channel dev` and `openclaw update --channel stable`. See
+[Updating](/install/updating#switch-between-npm-and-git-installs).
+
+### npm, pnpm, or bun
+
+If you already manage Node yourself:
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install -g openclaw@latest
+    openclaw onboard --install-daemon
+    ```
+
+    <Note>
+    The hosted installer clears npm freshness filters such as `min-release-age`
+    for the OpenClaw package install. If you install manually with npm, your own
+    npm policy still applies.
+    </Note>
+
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add -g openclaw@latest
+    pnpm approve-builds -g
+    openclaw onboard --install-daemon
+    ```
+
+    <Note>
+    pnpm requires explicit approval for packages with build scripts. Run `pnpm approve-builds -g` after the first install.
+    </Note>
+
+  </Tab>
+  <Tab title="bun">
+    ```bash
+    bun add -g openclaw@latest
+    openclaw onboard --install-daemon
+    ```
+
+    <Note>
+    Bun is supported for the global CLI install path. For the Gateway runtime, Node remains the recommended daemon runtime.
+    </Note>
+
+  </Tab>
+</Tabs>
+
+### From source
+
+For contributors or anyone who wants to run from a local checkout:
 
 ```bash
-curl -fsSL https://molt.bot/install.sh | bash -s -- --help
+git clone https://github.com/openclaw/openclaw.git
+cd openclaw
+pnpm install && pnpm build && pnpm ui:build
+pnpm link --global
+openclaw onboard --install-daemon
 ```
 
-Details: [Installer internals](/install/installer).
+Or skip the link and use `pnpm openclaw ...` from inside the repo. See [Setup](/start/setup) for full development workflows.
 
-Non-interactive (skip onboarding):
+### Install from the GitHub main checkout
 
 ```bash
-curl -fsSL https://molt.bot/install.sh | bash -s -- --no-onboard
+curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --install-method git --version main
 ```
 
-### 2) Global install (manual)
+### Containers and package managers
 
-If you already have Node:
+<CardGroup cols={2}>
+  <Card title="Docker" href="/install/docker" icon="container">
+    Containerized or headless deployments.
+  </Card>
+  <Card title="Podman" href="/install/podman" icon="container">
+    Rootless container alternative to Docker.
+  </Card>
+  <Card title="Nix" href="/install/nix" icon="snowflake">
+    Declarative install via Nix flake.
+  </Card>
+  <Card title="Ansible" href="/install/ansible" icon="server">
+    Automated fleet provisioning.
+  </Card>
+  <Card title="Bun" href="/install/bun" icon="zap">
+    CLI-only usage via the Bun runtime.
+  </Card>
+</CardGroup>
+
+## Verify the install
 
 ```bash
-npm install -g moltbot@latest
+openclaw --version      # confirm the CLI is available
+openclaw doctor         # check for config issues
+openclaw gateway status # verify the Gateway is running
 ```
 
-If you have libvips installed globally (common on macOS via Homebrew) and `sharp` fails to install, force prebuilt binaries:
+If you want managed startup after install:
+
+- macOS: LaunchAgent via `openclaw onboard --install-daemon` or `openclaw gateway install`
+- Linux/WSL2: systemd user service via the same commands
+- Native Windows: Scheduled Task first, with a per-user Startup-folder login item fallback if task creation is denied
+
+## Hosting and deployment
+
+Deploy OpenClaw on a cloud server or VPS:
+
+<CardGroup cols={3}>
+  <Card title="VPS" href="/vps">
+    Any Linux VPS.
+  </Card>
+  <Card title="Docker VM" href="/install/docker-vm-runtime">
+    Shared Docker steps.
+  </Card>
+  <Card title="Kubernetes" href="/install/kubernetes">
+    K8s deployment.
+  </Card>
+  <Card title="Fly.io" href="/install/fly">
+    Deploy on Fly.io.
+  </Card>
+  <Card title="Hetzner" href="/install/hetzner">
+    Hetzner deployment.
+  </Card>
+  <Card title="GCP" href="/install/gcp">
+    Google Cloud deployment.
+  </Card>
+  <Card title="Azure" href="/install/azure">
+    Azure deployment.
+  </Card>
+  <Card title="Railway" href="/install/railway">
+    Railway deployment.
+  </Card>
+  <Card title="Render" href="/install/render">
+    Render deployment.
+  </Card>
+  <Card title="Northflank" href="/install/northflank">
+    Northflank deployment.
+  </Card>
+</CardGroup>
+
+## Update, migrate, or uninstall
+
+<CardGroup cols={3}>
+  <Card title="Updating" href="/install/updating" icon="refresh-cw">
+    Keep OpenClaw up to date.
+  </Card>
+  <Card title="Migrating" href="/install/migrating" icon="arrow-right">
+    Move to a new machine.
+  </Card>
+  <Card title="Uninstall" href="/install/uninstall" icon="trash-2">
+    Remove OpenClaw completely.
+  </Card>
+</CardGroup>
+
+## Troubleshooting: `openclaw` not found
+
+If the install succeeded but `openclaw` is not found in your terminal:
 
 ```bash
-SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm install -g moltbot@latest
+node -v           # Node installed?
+npm prefix -g     # Where are global packages?
+echo "$PATH"      # Is the global bin dir in PATH?
 ```
 
-If you see `sharp: Please add node-gyp to your dependencies`, either install build tooling (macOS: Xcode CLT + `npm install -g node-gyp`) or use the `SHARP_IGNORE_GLOBAL_LIBVIPS=1` workaround above to skip the native build.
-
-Or:
+If `$(npm prefix -g)/bin` is not in your `$PATH`, add it to your shell startup file (`~/.zshrc` or `~/.bashrc`):
 
 ```bash
-pnpm add -g moltbot@latest
-```
-
-Then:
-
-```bash
-moltbot onboard --install-daemon
-```
-
-### 3) From source (contributors/dev)
-
-```bash
-git clone https://github.com/moltbot/moltbot.git
-cd moltbot
-pnpm install
-pnpm ui:build # auto-installs UI deps on first run
-pnpm build
-moltbot onboard --install-daemon
-```
-
-Tip: if you don’t have a global install yet, run repo commands via `pnpm moltbot ...`.
-
-### 4) Other install options
-
-- Docker: [Docker](/install/docker)
-- Nix: [Nix](/install/nix)
-- Ansible: [Ansible](/install/ansible)
-- Bun (CLI only): [Bun](/install/bun)
-
-## After install
-
-- Run onboarding: `moltbot onboard --install-daemon`
-- Quick check: `moltbot doctor`
-- Check gateway health: `moltbot status` + `moltbot health`
-- Open the dashboard: `moltbot dashboard`
-
-## Install method: npm vs git (installer)
-
-The installer supports two methods:
-
-- `npm` (default): `npm install -g moltbot@latest`
-- `git`: clone/build from GitHub and run from a source checkout
-
-### CLI flags
-
-```bash
-# Explicit npm
-curl -fsSL https://molt.bot/install.sh | bash -s -- --install-method npm
-
-# Install from GitHub (source checkout)
-curl -fsSL https://molt.bot/install.sh | bash -s -- --install-method git
-```
-
-Common flags:
-
-- `--install-method npm|git`
-- `--git-dir <path>` (default: `~/moltbot`)
-- `--no-git-update` (skip `git pull` when using an existing checkout)
-- `--no-prompt` (disable prompts; required in CI/automation)
-- `--dry-run` (print what would happen; make no changes)
-- `--no-onboard` (skip onboarding)
-
-### Environment variables
-
-Equivalent env vars (useful for automation):
-
-- `CLAWDBOT_INSTALL_METHOD=git|npm`
-- `CLAWDBOT_GIT_DIR=...`
-- `CLAWDBOT_GIT_UPDATE=0|1`
-- `CLAWDBOT_NO_PROMPT=1`
-- `CLAWDBOT_DRY_RUN=1`
-- `CLAWDBOT_NO_ONBOARD=1`
-- `SHARP_IGNORE_GLOBAL_LIBVIPS=0|1` (default: `1`; avoids `sharp` building against system libvips)
-
-## Troubleshooting: `moltbot` not found (PATH)
-
-Quick diagnosis:
-
-```bash
-node -v
-npm -v
-npm prefix -g
-echo "$PATH"
-```
-
-If `$(npm prefix -g)/bin` (macOS/Linux) or `$(npm prefix -g)` (Windows) is **not** present inside `echo "$PATH"`, your shell can’t find global npm binaries (including `moltbot`).
-
-Fix: add it to your shell startup file (zsh: `~/.zshrc`, bash: `~/.bashrc`):
-
-```bash
-# macOS / Linux
 export PATH="$(npm prefix -g)/bin:$PATH"
 ```
 
-On Windows, add the output of `npm prefix -g` to your PATH.
-
-Then open a new terminal (or `rehash` in zsh / `hash -r` in bash).
-
-## Update / uninstall
-
-- Updates: [Updating](/install/updating)
-- Migrate to a new machine: [Migrating](/install/migrating)
-- Uninstall: [Uninstall](/install/uninstall)
+Then open a new terminal. See [Node setup](/install/node) for more details.
